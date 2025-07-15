@@ -17,14 +17,14 @@ class LLMManager:
 
     def _setup_providers(self):
         try:
-            from agents.gemini import gemini
+            from .agents import gemini
 
             self.providers["gemini"] = gemini
         except ImportError:
             pass
 
         try:
-            from agents.gpt import gpt
+            from .agents import gpt
 
             self.providers["gpt"] = gpt
         except ImportError:
@@ -47,10 +47,22 @@ class LLMManager:
             else:
                 json_part = text
         else:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                json_part = text[start : end + 1]
+            # Try to find JSON object or array
+            start_obj = text.find("{")
+            start_arr = text.find("[")
+
+            if start_obj != -1 and (start_arr == -1 or start_obj < start_arr):
+                end = text.rfind("}")
+                if end != -1 and end > start_obj:
+                    json_part = text[start_obj : end + 1]
+                else:
+                    json_part = text
+            elif start_arr != -1:
+                end = text.rfind("]")
+                if end != -1 and end > start_arr:
+                    json_part = text[start_arr : end + 1]
+                else:
+                    json_part = text
             else:
                 json_part = text
 
@@ -58,7 +70,15 @@ class LLMManager:
         json_part = re.sub(r",\s*}", "}", json_part)
         json_part = re.sub(r",\s*]", "]", json_part)
 
-        return json.loads(json_part)
+        try:
+            result = json.loads(json_part)
+            # If it's a list, wrap it in a dict
+            if isinstance(result, list):
+                return {"domains": result}
+            return result
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return empty dict
+            return {}
 
     def _call_provider(
         self, provider_name: str, provider_func, prompt: str, retries: int = 2
