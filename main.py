@@ -18,7 +18,7 @@ def main():
     dotenv.load_dotenv()
 
     # Default: gemini -> gpt
-    finder = DomainFinder()
+    # finder = DomainFinder()
 
     # Or specify preferred order: gpt -> gemini
     finder = DomainFinder(provider_order=["gpt", "gemini"])
