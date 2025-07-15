@@ -486,10 +486,20 @@ class DomainValidator:
 # ============================================================================
 
 
-def research_company(company_query: str, llm_manager: LLMManager) -> CompanyInfo:
+def research_company(
+    company_query: str, llm_manager: LLMManager, context: Dict[str, Any] = None
+) -> CompanyInfo:
+    # Build context section if provided
+    context_section = ""
+    if context:
+        context_section = "\n\nAdditional context to identify the correct company:\n"
+        for key, value in context.items():
+            if value:
+                context_section += f"- {key.title()}: {value}\n"
+
     prompt = f"""
     Research "{company_query}" and provide ONLY the JSON response below.
-    
+    {context_section}
     For "{company_query}", return exactly this JSON format:
     {{
         "company_name": "Short searchable name",
@@ -609,12 +619,19 @@ class DomainFinder:
         self.domain_validator = DomainValidator()
 
     def find_domains(
-        self, company_query: str, max_results: int = 30
+        self, company_query: str, max_results: int = 30, context: Dict[str, Any] = None
     ) -> List[DomainResult]:
-        """Find and rank domains by confidence score"""
+        """Find and rank domains by confidence score
+
+        Args:
+            company_query: Name of the company to search for
+            max_results: Maximum number of search results to process
+            context: Additional context to help identify the correct company
+                    e.g., {"industry": "Technology", "location": "New York", "linkedin": "...", "website": "..."}
+        """
 
         # Research company
-        company_info = research_company(company_query, self.llm_manager)
+        company_info = research_company(company_query, self.llm_manager, context)
 
         # Search for emails
         search_results = self.web_scraper.search_emails(
@@ -658,9 +675,15 @@ if __name__ == "__main__":
     # Initialize finder
     finder = DomainFinder()
 
-    # Find domains
+    # Find domains with context
     company = "Daffodil International University"
-    results = finder.find_domains(company)
+    context = {
+        "industry": "Education",
+        "location": "Bangladesh",
+        "website": "diu.edu.bd",
+    }
+
+    results = finder.find_domains(company, context=context)
 
     print(f"🏢 {company}")
     print(f"📊 Found {len(results)} ranked domains:")

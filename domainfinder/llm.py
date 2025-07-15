@@ -1,12 +1,22 @@
-from typing import List
+from typing import List, Dict, Any
 from .schema import CompanyInfo
 from .utils import LLMManager
 
 
-def research_company(company_query: str, llm_manager: LLMManager) -> CompanyInfo:
+def research_company(
+    company_query: str, llm_manager: LLMManager, context: Dict[str, Any] = None
+) -> CompanyInfo:
+    # Build context section if provided
+    context_section = ""
+    if context:
+        context_section = "\n\nAdditional context to identify the correct company:\n"
+        for key, value in context.items():
+            if value:
+                context_section += f"- {key.title()}: {value}\n"
+
     prompt = f"""
     Research "{company_query}" and provide ONLY the JSON response below.
-    
+    {context_section}
     For "{company_query}", return exactly this JSON format:
     {{
         "company_name": "Short searchable name",

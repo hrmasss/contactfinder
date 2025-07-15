@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Dict, Any
 from .schema import DomainResult
 from .utils import LLMManager, WebScraper, DomainValidator
 from .llm import research_company, filter_relevant_domains
@@ -16,12 +16,19 @@ class DomainFinder:
         self.domain_validator = DomainValidator()
 
     def find_domains(
-        self, company_query: str, max_results: int = 30
+        self, company_query: str, max_results: int = 30, context: Dict[str, Any] = None
     ) -> List[DomainResult]:
-        """Find and rank domains by confidence score"""
+        """Find and rank domains by confidence score
+
+        Args:
+            company_query: Name of the company to search for
+            max_results: Maximum number of search results to process
+            context: Additional context to help identify the correct company
+                    e.g., {"industry": "Technology", "location": "New York", "linkedin": "...", "website": "..."}
+        """
 
         # Research company
-        company_info = research_company(company_query, self.llm_manager)
+        company_info = research_company(company_query, self.llm_manager, context)
 
         # Search for emails
         search_results = self.web_scraper.search_emails(

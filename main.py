@@ -24,6 +24,11 @@ def main():
     finder = DomainFinder(provider_order=["gpt", "gemini"])
 
     company = "Daffodil International University"
+    context = {
+        "industry": "Education",
+        "location": "Bangladesh",
+        "website": "diu.edu.bd",
+    }
 
     print(f"🏢 Finding domains for: {company}")
     print(f"🔄 LLM Provider order: {' → '.join(finder.llm_manager.provider_order)}")
@@ -38,7 +43,7 @@ def main():
     start_time = time.time()
 
     try:
-        results = finder.find_domains(company)
+        results = finder.find_domains(company, context=context)
         print("Raw results:", results)
 
         # Stop spinner
