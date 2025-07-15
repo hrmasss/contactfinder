@@ -793,37 +793,30 @@ class DomainFinder:
 
 
 # ============================================================================
-# EXAMPLE USAGE
+# BACKWARD COMPATIBILITY HELPER
 # ============================================================================
 
-if __name__ == "__main__":
-    import dotenv
 
-    dotenv.load_dotenv()
+def find_contact_info(
+    company_query: str, max_results: int = 30, context: Dict[str, Any] = None
+) -> List[str]:
+    """Main contact finder pipeline, returns only domain list
 
-    # Initialize finder
+    Args:
+        company_query: Name of the company to search for
+        max_results: Maximum number of search results to process (default 30)
+        context: Additional context to help identify the correct company
+                e.g., {"industry": "Technology", "location": "New York", "website": "..."}
+
+    Returns:
+        List of domain names sorted by confidence
+    """
+
     finder = DomainFinder()
+    results = finder.find_domains(
+        company_query, max_results=max_results, context=context
+    )
 
-    # Find domains with context
-    company = "Daffodil International University"
-    context = {
-        "industry": "Education",
-        "location": "Bangladesh",
-        "website": "diu.edu.bd",
-    }
-
-    results = finder.find_domains(company, context=context)
-
-    print(f"🏢 {company}")
-    print(f"📊 Found {len(results)} ranked domains:")
-    print("-" * 50)
-
-    for i, domain in enumerate(results, 1):
-        print(
-            f"{i:2d}. {domain.domain:<25} ({domain.confidence:.3f}) - {domain.email_count} emails"
-        )
-
-    if results:
-        print(f"\n💡 Best domain: {results[0].domain}")
-    else:
-        print("\n⚠️ No domains found")
+    # Return only the list of domains
+    domains = [result.domain for result in results]
+    return domains
