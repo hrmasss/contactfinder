@@ -38,24 +38,26 @@ class DomainFinder:
         # Scrape pages
         scraped_data = self.web_scraper.scrape_all(search_results)
 
-        # Validate domains
-        all_domains = (
-            list(scraped_data["domain_sources"].keys())
-            + company_info.likely_email_domains
-        )
-        all_domains = list(set(all_domains))
-        mx_results = self.domain_validator.validate_domains(all_domains)
-
-        # Analyze domains
+        # Analyze domains (without MX filtering yet)
         domain_analysis = self.domain_validator.analyze_domains(
-            scraped_data, company_info.likely_email_domains, mx_results
+            scraped_data, company_info.likely_email_domains, {}
         )
 
-        # Filter for relevance
+        # Filter for relevance with company research context
         domain_dicts = [d.model_dump() for d in domain_analysis]
         filtered_dicts = filter_relevant_domains(
-            company_query, domain_dicts, self.llm_manager
+            company_query, domain_dicts, self.llm_manager, company_info
         )
 
         # Convert back to DomainResult objects
-        return [DomainResult(**d) for d in filtered_dicts]
+        filtered_results = [DomainResult(**d) for d in filtered_dicts]
+
+        # Final MX lookup validation
+        final_results = []
+        for result in filtered_results:
+            if self.domain_validator.has_mx_record(result.domain):
+                result.mx_valid = True
+                final_results.append(result)
+
+        # Re-sort by confidence after MX filtering
+        return sorted(final_results, key=lambda x: x.confidence, reverse=True)

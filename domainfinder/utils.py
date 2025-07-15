@@ -9,12 +9,8 @@ from bs4 import BeautifulSoup
 from .schema import LLMResponse, SearchResult, DomainResult
 
 
-# Common TLD patterns for domain validation
-COMMON_TLDS = r"(com|org|net|edu|gov|mil|info|biz|io|ai|co|tv|me|ly|tech|app|dev|xyz|online|store|blog|news|digital|cloud|agency|solutions|services|consulting|photography|international|technology|community|foundation|management|construction|engineering|university|healthcare|financial|insurance|restaurant|travel|hotel|fashion|design|media|software|security|academy|institute|research|center|group|team|studio|gallery|events|music|video|games|sports|fitness|health|beauty|lifestyle|food|auto|legal|law|medical|dental|school|college|training|courses|books|library|museum|art|culture|history|science|energy|business|finance|support|help|contact|about|home|main|shop|buy|sell|order|account|login|register|profile|user|admin|api|mobile)"
-
-
 def _clean_domain_text(domain: str) -> str:
-    """Unified domain cleaning logic for both email extraction and domain validation"""
+    """Basic domain cleaning - keep it simple"""
     if not domain:
         return ""
 
@@ -35,20 +31,6 @@ def _clean_domain_text(domain: str) -> str:
     domain = re.sub(r"[,;:!?\s].*$", "", domain)
     domain = re.sub(r"[(\[\{].*$", "", domain)
     domain = re.sub(r'["\'].*$', "", domain)
-    domain = re.sub(r"<.*$", "", domain)
-    domain = re.sub(r"[^a-zA-Z0-9.-]+.*$", "", domain)
-
-    # Truncate at first valid TLD to handle malformed domains like "example.comasdfsadf"
-    tld_matches = list(re.finditer(r"\.(" + COMMON_TLDS + r")(?=[^a-zA-Z]|$)", domain))
-    if tld_matches:
-        domain = domain[: tld_matches[0].end()]
-    else:
-        # Fallback to short TLD pattern (2-6 characters max)
-        tld_matches = list(re.finditer(r"\.[a-zA-Z]{2,6}(?=[^a-zA-Z]|$)", domain))
-        if tld_matches:
-            domain = domain[: tld_matches[0].end()]
-        else:
-            return ""
 
     # Basic validation
     if (
@@ -58,6 +40,8 @@ def _clean_domain_text(domain: str) -> str:
         or ".." in domain
         or ".-" in domain
         or "-." in domain
+        or not domain
+        or "." not in domain
     ):
         return ""
 
@@ -384,29 +368,34 @@ class DomainValidator:
                 except Exception:
                     continue
 
-        # Clean LLM-suggested domains
-        clean_llm_domains = [
-            _clean_domain_text(d) for d in llm_domains if _clean_domain_text(d)
-        ]
+        # Add LLM-suggested domains
+        for domain in llm_domains:
+            domain = _clean_domain_text(domain)
+            if domain:
+                domain_counts[domain] = domain_counts.get(domain, 0)
 
-        # Get all domains that have valid MX records
-        all_domains = set(domain_counts.keys()) | set(clean_llm_domains)
-        valid_domains = {d for d in all_domains if mx_results.get(d, False)}
-
-        # Calculate confidence scores
+        # Calculate confidence scores for all domains
         results = []
-        for domain in valid_domains:
-            email_count = domain_counts.get(domain, 0)
+        for domain, email_count in domain_counts.items():
             source_count = len(domain_sources.get(domain, []))
-            from_llm = domain in clean_llm_domains
+            from_llm = domain in llm_domains
 
             confidence = 0.0
+
+            # Base score for LLM suggestions
             if from_llm:
-                confidence += 0.3
+                confidence += 0.4
+
+            # Email count bonus
             if email_count > 0:
-                confidence += min(0.5, email_count * 0.05)
+                confidence += min(0.3, email_count * 0.05)
+
+            # Source diversity bonus
             if source_count > 0:
-                confidence += min(0.3, source_count * 0.03)
+                confidence += min(0.2, source_count * 0.03)
+
+            # Domain name relevance bonus
+            confidence += 0.1
 
             results.append(
                 DomainResult(
@@ -415,7 +404,7 @@ class DomainValidator:
                     source_count=source_count,
                     confidence=round(min(1.0, confidence), 3),
                     from_llm=from_llm,
-                    mx_valid=True,
+                    mx_valid=False,
                 )
             )
 

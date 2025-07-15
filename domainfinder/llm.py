@@ -53,7 +53,10 @@ def research_company(
 
 
 def filter_relevant_domains(
-    company_name: str, domains: List[dict], llm_manager: LLMManager
+    company_name: str,
+    domains: List[dict],
+    llm_manager: LLMManager,
+    company_info: CompanyInfo = None,
 ) -> List[dict]:
     if len(domains) <= 3:
         return domains
@@ -62,27 +65,44 @@ def filter_relevant_domains(
         [f"- {d['domain']}: {d['email_count']} emails" for d in domains[:15]]
     )
 
+    # Include company research context
+    research_context = ""
+    if company_info:
+        research_context = f"""
+Company Research Context:
+- Official Company: {company_info.company_name}
+- Known Website: {company_info.website}
+- Expected Domains: {", ".join(company_info.likely_email_domains)}
+- Description: {company_info.description}
+"""
+
     prompt = f"""
     Company: "{company_name}"
+    {research_context}
     
-    Email domains found:
+    Raw domains found (may contain malformed domains):
     {domain_list}
     
-    Filter to keep only domains DIRECTLY related to "{company_name}".
+    Tasks:
+    1. Clean up malformed domains (e.g., "example.comasdfsadf" → "example.com")
+    2. Keep only domains DIRECTLY related to "{company_name}"
+    3. Use the company research context to make informed decisions
     
-    Remove:
-    - Generic domains (gmail, yahoo, hotmail)
+    REMOVE:
+    - Generic domains (gmail, yahoo, hotmail, outlook)
     - Unrelated companies
-    - Partner/vendor domains
     - Personal domains
+    - Domains with completely different business focus
     
-    Keep:
-    - Primary company domains
+    KEEP AND CLEAN:
+    - Primary company domains (clean up if malformed)
+    - Official website domain and its variations
     - Subsidiary domains
-    - Department domains
+    - Department/division domains
+    - Regional domains (compound TLDs like .co.uk, .edu.bd)
     
-    Return ONLY a JSON array of relevant domain names:
-    ["domain1.com", "domain2.org"]
+    Return ONLY a JSON array of cleaned, relevant domain names:
+    ["cleaneddomain1.com", "cleaneddomain2.co.uk"]
     """
 
     response = llm_manager.query(prompt)
@@ -102,7 +122,63 @@ def filter_relevant_domains(
             else:
                 return domains
 
-        filtered = [d for d in domains if d["domain"] in relevant_domains]
-        return filtered if filtered else domains
+        # Consolidate cleaned domains and merge their data
+        domain_map = {}
+        for original_domain in domains:
+            # Find if this domain has a cleaned version
+            cleaned_version = None
+            for clean_domain in relevant_domains:
+                if clean_domain.replace(".", "").replace("-", "") in original_domain[
+                    "domain"
+                ].replace(".", "").replace("-", ""):
+                    cleaned_version = clean_domain
+                    break
+
+            if cleaned_version:
+                if cleaned_version not in domain_map:
+                    domain_map[cleaned_version] = {
+                        "domain": cleaned_version,
+                        "email_count": 0,
+                        "source_count": 0,
+                        "confidence": 0.0,
+                        "from_llm": False,
+                        "mx_valid": False,
+                    }
+
+                # Merge data from all versions of this domain
+                domain_map[cleaned_version]["email_count"] += original_domain[
+                    "email_count"
+                ]
+                domain_map[cleaned_version]["source_count"] += original_domain[
+                    "source_count"
+                ]
+                domain_map[cleaned_version]["from_llm"] = (
+                    domain_map[cleaned_version]["from_llm"]
+                    or original_domain["from_llm"]
+                )
+                domain_map[cleaned_version]["mx_valid"] = (
+                    domain_map[cleaned_version]["mx_valid"]
+                    or original_domain["mx_valid"]
+                )
+
+        # Recalculate confidence scores after consolidation
+        for domain_data in domain_map.values():
+            confidence = 0.0
+            if domain_data["from_llm"]:
+                confidence += 0.4  # Higher weight for LLM suggestions
+            if domain_data["email_count"] > 0:
+                confidence += min(0.4, domain_data["email_count"] * 0.05)
+            if domain_data["source_count"] > 0:
+                confidence += min(0.3, domain_data["source_count"] * 0.03)
+
+            # Bonus for likely official domains
+            if any(
+                word in domain_data["domain"] for word in company_name.lower().split()
+            ):
+                confidence += 0.2
+
+            domain_data["confidence"] = round(min(1.0, confidence), 3)
+
+        return list(domain_map.values()) if domain_map else domains
     except Exception:
         return domains
