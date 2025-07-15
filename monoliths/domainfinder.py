@@ -19,6 +19,65 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 
 
 # ============================================================================
+# COMMON UTILITIES
+# ============================================================================
+
+# Common TLD patterns for domain validation
+COMMON_TLDS = r"(com|org|net|edu|gov|mil|info|biz|io|ai|co|tv|me|ly|tech|app|dev|xyz|online|store|blog|news|digital|cloud|agency|solutions|services|consulting|photography|international|technology|community|foundation|management|construction|engineering|university|healthcare|financial|insurance|restaurant|travel|hotel|fashion|design|media|software|security|academy|institute|research|center|group|team|studio|gallery|events|music|video|games|sports|fitness|health|beauty|lifestyle|food|auto|legal|law|medical|dental|school|college|training|courses|books|library|museum|art|culture|history|science|energy|business|finance|support|help|contact|about|home|main|shop|buy|sell|order|account|login|register|profile|user|admin|api|mobile)"
+
+
+def _clean_domain_text(domain: str) -> str:
+    """Unified domain cleaning logic for both email extraction and domain validation"""
+    if not domain:
+        return ""
+
+    domain = domain.strip().lower()
+
+    # Remove protocol prefixes
+    if domain.startswith(("http://", "https://")):
+        domain = domain.split("://", 1)[1]
+
+    # Remove www prefix
+    if domain.startswith("www."):
+        domain = domain[4:]
+
+    # Remove path, query, and fragment
+    domain = domain.split("/")[0].split("?")[0].split("#")[0]
+
+    # Remove common trailing separators and everything after
+    domain = re.sub(r"[,;:!?\s].*$", "", domain)
+    domain = re.sub(r"[(\[\{].*$", "", domain)
+    domain = re.sub(r'["\'].*$', "", domain)
+    domain = re.sub(r"<.*$", "", domain)
+    domain = re.sub(r"[^a-zA-Z0-9.-]+.*$", "", domain)
+
+    # Truncate at first valid TLD to handle malformed domains like "example.comasdfsadf"
+    tld_matches = list(re.finditer(r"\.(" + COMMON_TLDS + r")(?=[^a-zA-Z]|$)", domain))
+    if tld_matches:
+        domain = domain[: tld_matches[0].end()]
+    else:
+        # Fallback to short TLD pattern (2-6 characters max)
+        tld_matches = list(re.finditer(r"\.[a-zA-Z]{2,6}(?=[^a-zA-Z]|$)", domain))
+        if tld_matches:
+            domain = domain[: tld_matches[0].end()]
+        else:
+            return ""
+
+    # Basic validation
+    if (
+        len(domain) > 100
+        or domain.startswith((".", "-"))
+        or domain.endswith((".", "-"))
+        or ".." in domain
+        or ".-" in domain
+        or "-." in domain
+    ):
+        return ""
+
+    return domain
+
+
+# ============================================================================
 # PYDANTIC MODELS
 # ============================================================================
 
@@ -288,13 +347,15 @@ class WebScraper:
         return unique_results[:max_results]
 
     def extract_emails(self, text: str) -> Set[str]:
-        pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+        """Extract and validate email addresses from text"""
+        pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b"
         emails = set(re.findall(pattern, text, re.IGNORECASE))
 
         filtered = set()
         for email in emails:
             email = email.lower().strip()
 
+            # Skip test/example emails
             if any(
                 skip in email
                 for skip in ["example.", "test@", "noreply", "no-reply", "placeholder"]
@@ -306,21 +367,26 @@ class WebScraper:
 
             try:
                 local_part, domain = email.split("@", 1)
-                if "." in domain and len(domain) > 3:
-                    filtered.add(email)
+                cleaned_domain = _clean_domain_text(domain)
+
+                if cleaned_domain and "." in cleaned_domain and len(cleaned_domain) > 3:
+                    filtered.add(f"{local_part}@{cleaned_domain}")
             except ValueError:
                 continue
 
         return filtered
 
     def scrape_page(self, url: str) -> Set[str]:
+        """Scrape a webpage for email addresses"""
         try:
             response = requests.get(url, headers=self.headers, timeout=8)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, "html.parser")
 
+                # Extract emails from page text
                 text_emails = self.extract_emails(soup.get_text())
 
+                # Extract emails from mailto links
                 mailto_emails = set()
                 for link in soup.find_all("a", href=re.compile(r"^mailto:")):
                     href = link.get("href", "")
@@ -338,6 +404,7 @@ class WebScraper:
         return set()
 
     def scrape_all(self, search_results: List[SearchResult]) -> Dict:
+        """Scrape all search results and organize by domain"""
         all_emails = set()
         domain_sources = {}
 
@@ -351,8 +418,10 @@ class WebScraper:
                     if "@" in email:
                         try:
                             domain = email.split("@")[1]
-                            if domain and "." in domain:
-                                domain_sources.setdefault(domain, []).append(
+                            cleaned_domain = _clean_domain_text(domain)
+
+                            if cleaned_domain and "." in cleaned_domain:
+                                domain_sources.setdefault(cleaned_domain, []).append(
                                     result.link
                                 )
                         except Exception:
@@ -362,42 +431,12 @@ class WebScraper:
 
 
 class DomainValidator:
-    def clean_domain(self, domain: str) -> str:
-        if not domain:
-            return ""
-
-        domain = domain.strip().lower()
-
-        if domain.startswith("http://") or domain.startswith("https://"):
-            domain = domain.split("://", 1)[1]
-
-        if domain.startswith("www."):
-            domain = domain[4:]
-
-        domain = domain.split("/")[0]
-        domain = re.sub(r"[^a-zA-Z0-9.-]+.*$", "", domain)
-
-        known_tlds = ["com", "org", "net", "edu", "gov", "io", "tv", "fm", "co"]
-
-        for tld in known_tlds:
-            pattern = rf"\.{tld}[a-zA-Z]+"
-            if re.search(pattern, domain):
-                parts = domain.split(f".{tld}")
-                if len(parts) > 1:
-                    domain = f"{parts[0]}.{tld}"
-                    break
-
-        if not re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", domain):
-            return ""
-
-        if len(domain) > 100:
-            return ""
-
-        return domain
+    """Handles domain validation and DNS checks"""
 
     def has_mx_record(self, domain: str) -> bool:
+        """Check if domain has valid MX or A records"""
         try:
-            domain = self.clean_domain(domain)
+            domain = _clean_domain_text(domain)
             if not domain:
                 return False
 
@@ -416,42 +455,41 @@ class DomainValidator:
             return False
 
     def validate_domains(self, domains: List[str]) -> Dict[str, bool]:
+        """Validate multiple domains for MX/A records"""
         if not domains:
             return {}
 
-        results = {}
-        for domain in domains:
-            if domain:
-                results[domain] = self.has_mx_record(domain)
-
-        return results
+        return {domain: self.has_mx_record(domain) for domain in domains if domain}
 
     def analyze_domains(
         self, scraped_data: Dict, llm_domains: List[str], mx_results: Dict[str, bool]
     ) -> List[DomainResult]:
+        """Analyze and rank domains by confidence score"""
         emails = scraped_data["emails"]
         domain_sources = scraped_data["domain_sources"]
 
+        # Count email occurrences per domain
         domain_counts = Counter()
         for email in emails:
             if "@" in email:
                 try:
                     domain = email.split("@")[1]
-                    domain = self.clean_domain(domain)
+                    domain = _clean_domain_text(domain)
                     if domain:
                         domain_counts[domain] += 1
                 except Exception:
                     continue
 
-        clean_llm_domains = []
-        for domain in llm_domains:
-            clean_d = self.clean_domain(domain)
-            if clean_d:
-                clean_llm_domains.append(clean_d)
+        # Clean LLM-suggested domains
+        clean_llm_domains = [
+            _clean_domain_text(d) for d in llm_domains if _clean_domain_text(d)
+        ]
 
+        # Get all domains that have valid MX records
         all_domains = set(domain_counts.keys()) | set(clean_llm_domains)
         valid_domains = {d for d in all_domains if mx_results.get(d, False)}
 
+        # Calculate confidence scores
         results = []
         for domain in valid_domains:
             email_count = domain_counts.get(domain, 0)
@@ -477,8 +515,7 @@ class DomainValidator:
                 )
             )
 
-        results.sort(key=lambda x: x.confidence, reverse=True)
-        return results
+        return sorted(results, key=lambda x: x.confidence, reverse=True)
 
 
 # ============================================================================
