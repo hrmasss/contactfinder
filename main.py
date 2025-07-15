@@ -2,6 +2,7 @@ import time
 import dotenv
 import threading
 from domainfinder import DomainFinder
+from emailfinder import EmailFinder
 
 
 def loading_spinner(stop_event):
@@ -18,34 +19,37 @@ def main():
     dotenv.load_dotenv()
 
     # Default: gemini -> gpt
-    # finder = DomainFinder()
+    # provider_order = ["gemini", "gpt"]
+    # Custom: gpt -> gemini
+    provider_order = ["gpt", "gemini"]
 
-    # Or specify preferred order: gpt -> gemini
-    finder = DomainFinder(provider_order=["gpt", "gemini"])
+    # Initialize domain finder
+    domain_finder = DomainFinder(provider_order=provider_order)
 
-    company = "Daffodil International University"
-    context = {}
+    # Test domain finder
+    print("🔍 DOMAIN FINDER TEST")
+    print("=" * 50)
 
-    print(f"🏢 Finding domains for: {company}")
-    print(f"🔄 LLM Provider order: {' → '.join(finder.llm_manager.provider_order)}")
-    print()
+    # Test company
+    company = "OpenAI"
+    context = {
+        "industry": "AI Technology",
+        "location": "San Francisco",
+        "website": "openai.com",
+    }
 
-    # Start loading spinner
+    # Start spinner
     stop_spinner = threading.Event()
     spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
     spinner_thread.start()
 
-    # Track timing
-    start_time = time.time()
-
     try:
-        results = finder.find_domains(company, context=context)
-
-        # Stop spinner
+        start_time = time.time()
+        results = domain_finder.find_domains(company, context=context)
         stop_spinner.set()
         spinner_thread.join()
 
-        # Clear spinner line
+        # Clear spinner
         print("\r" + " " * 20 + "\r", end="")
 
         end_time = time.time()
@@ -61,9 +65,66 @@ def main():
             )
 
         if results:
-            print(f"\n💡 Best domain: {results[0].domain}")
+            print(f"\n� Best domain: {results[0].domain}")
         else:
             print("\n⚠️ No domains found")
+
+    except Exception as e:
+        # Stop spinner on error
+        stop_spinner.set()
+        spinner_thread.join()
+        print("\r" + " " * 20 + "\r", end="")
+        print(f"❌ Error: {e}")
+
+    # Test email finder
+    print("\n\n📧 EMAIL FINDER TEST")
+    print("=" * 50)
+
+    # Initialize email finder
+    email_finder = EmailFinder(provider_order=provider_order)
+
+    # Test employee
+    employee_name = "Sam Altman"
+    company_name = "OpenAI"
+
+    employee_context = {"title": "CEO", "department": "Executive"}
+
+    # Start spinner
+    stop_spinner = threading.Event()
+    spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
+    spinner_thread.start()
+
+    try:
+        start_time = time.time()
+        email_results = email_finder.find_emails(
+            employee_name,
+            company_name,
+            company_context=context,
+            employee_context=employee_context,
+            max_results=10,
+        )
+        stop_spinner.set()
+        spinner_thread.join()
+
+        # Clear spinner
+        print("\r" + " " * 20 + "\r", end="")
+
+        end_time = time.time()
+        duration = end_time - start_time
+
+        print(f"✅ Analysis complete in {duration:.2f}s")
+        print(f"� Found {len(email_results)} potential emails:")
+        print("-" * 50)
+
+        for i, email in enumerate(email_results, 1):
+            print(
+                f"{i:2d}. {email.email:<35} ({email.confidence:.3f}) - {email.pattern_type}"
+            )
+
+        if email_results:
+            print(f"\n💡 Best email: {email_results[0].email}")
+        else:
+            print("\n⚠️ No emails found")
 
     except Exception as e:
         # Stop spinner on error
