@@ -22,12 +22,9 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 # COMMON UTILITIES
 # ============================================================================
 
-# Common TLD patterns for domain validation
-COMMON_TLDS = r"(com|org|net|edu|gov|mil|info|biz|io|ai|co|tv|me|ly|tech|app|dev|xyz|online|store|blog|news|digital|cloud|agency|solutions|services|consulting|photography|international|technology|community|foundation|management|construction|engineering|university|healthcare|financial|insurance|restaurant|travel|hotel|fashion|design|media|software|security|academy|institute|research|center|group|team|studio|gallery|events|music|video|games|sports|fitness|health|beauty|lifestyle|food|auto|legal|law|medical|dental|school|college|training|courses|books|library|museum|art|culture|history|science|energy|business|finance|support|help|contact|about|home|main|shop|buy|sell|order|account|login|register|profile|user|admin|api|mobile)"
-
 
 def _clean_domain_text(domain: str) -> str:
-    """Unified domain cleaning logic for both email extraction and domain validation"""
+    """Basic domain cleaning - keep it simple"""
     if not domain:
         return ""
 
@@ -48,20 +45,6 @@ def _clean_domain_text(domain: str) -> str:
     domain = re.sub(r"[,;:!?\s].*$", "", domain)
     domain = re.sub(r"[(\[\{].*$", "", domain)
     domain = re.sub(r'["\'].*$', "", domain)
-    domain = re.sub(r"<.*$", "", domain)
-    domain = re.sub(r"[^a-zA-Z0-9.-]+.*$", "", domain)
-
-    # Truncate at first valid TLD to handle malformed domains like "example.comasdfsadf"
-    tld_matches = list(re.finditer(r"\.(" + COMMON_TLDS + r")(?=[^a-zA-Z]|$)", domain))
-    if tld_matches:
-        domain = domain[: tld_matches[0].end()]
-    else:
-        # Fallback to short TLD pattern (2-6 characters max)
-        tld_matches = list(re.finditer(r"\.[a-zA-Z]{2,6}(?=[^a-zA-Z]|$)", domain))
-        if tld_matches:
-            domain = domain[: tld_matches[0].end()]
-        else:
-            return ""
 
     # Basic validation
     if (
@@ -71,6 +54,8 @@ def _clean_domain_text(domain: str) -> str:
         or ".." in domain
         or ".-" in domain
         or "-." in domain
+        or not domain
+        or "." not in domain
     ):
         return ""
 
@@ -480,29 +465,34 @@ class DomainValidator:
                 except Exception:
                     continue
 
-        # Clean LLM-suggested domains
-        clean_llm_domains = [
-            _clean_domain_text(d) for d in llm_domains if _clean_domain_text(d)
-        ]
+        # Add LLM-suggested domains
+        for domain in llm_domains:
+            domain = _clean_domain_text(domain)
+            if domain:
+                domain_counts[domain] = domain_counts.get(domain, 0)
 
-        # Get all domains that have valid MX records
-        all_domains = set(domain_counts.keys()) | set(clean_llm_domains)
-        valid_domains = {d for d in all_domains if mx_results.get(d, False)}
-
-        # Calculate confidence scores
+        # Calculate confidence scores for all domains
         results = []
-        for domain in valid_domains:
-            email_count = domain_counts.get(domain, 0)
+        for domain, email_count in domain_counts.items():
             source_count = len(domain_sources.get(domain, []))
-            from_llm = domain in clean_llm_domains
+            from_llm = domain in llm_domains
 
             confidence = 0.0
+
+            # Base score for LLM suggestions (company research)
             if from_llm:
-                confidence += 0.3
+                confidence += 0.4
+
+            # Email count bonus (but not overwhelming)
             if email_count > 0:
-                confidence += min(0.5, email_count * 0.05)
+                confidence += min(0.3, email_count * 0.03)
+
+            # Source diversity bonus
             if source_count > 0:
-                confidence += min(0.3, source_count * 0.03)
+                confidence += min(0.2, source_count * 0.02)
+
+            # Domain name relevance bonus
+            confidence += 0.1
 
             results.append(
                 DomainResult(
@@ -511,7 +501,7 @@ class DomainValidator:
                     source_count=source_count,
                     confidence=round(min(1.0, confidence), 3),
                     from_llm=from_llm,
-                    mx_valid=True,
+                    mx_valid=False,
                 )
             )
 
@@ -573,7 +563,10 @@ def research_company(
 
 
 def filter_relevant_domains(
-    company_name: str, domains: List[dict], llm_manager: LLMManager
+    company_name: str,
+    domains: List[dict],
+    llm_manager: LLMManager,
+    company_info: CompanyInfo = None,
 ) -> List[dict]:
     if len(domains) <= 3:
         return domains
@@ -582,27 +575,44 @@ def filter_relevant_domains(
         [f"- {d['domain']}: {d['email_count']} emails" for d in domains[:15]]
     )
 
+    # Include company research context
+    research_context = ""
+    if company_info:
+        research_context = f"""
+Company Research Context:
+- Official Company: {company_info.company_name}
+- Known Website: {company_info.website}
+- Expected Domains: {", ".join(company_info.likely_email_domains)}
+- Description: {company_info.description}
+"""
+
     prompt = f"""
     Company: "{company_name}"
+    {research_context}
     
-    Email domains found:
+    Raw domains found (may contain malformed domains):
     {domain_list}
     
-    Filter to keep only domains DIRECTLY related to "{company_name}".
+    Tasks:
+    1. Clean up malformed domains (e.g., "example.comasdfsadf" → "example.com")
+    2. Keep only domains DIRECTLY related to "{company_name}"
+    3. Use the company research context to make informed decisions
     
-    Remove:
-    - Generic domains (gmail, yahoo, hotmail)
+    REMOVE:
+    - Generic domains (gmail, yahoo, hotmail, outlook)
     - Unrelated companies
-    - Partner/vendor domains
     - Personal domains
+    - Domains with completely different business focus
     
-    Keep:
-    - Primary company domains
+    KEEP AND CLEAN:
+    - Primary company domains (clean up if malformed)
+    - Official website domain and its variations
     - Subsidiary domains
-    - Department domains
+    - Department/division domains
+    - Regional domains (compound TLDs like .co.uk, .edu.bd)
     
-    Return ONLY a JSON array of relevant domain names:
-    ["domain1.com", "domain2.org"]
+    Return ONLY a JSON array of cleaned, relevant domain names:
+    ["cleaneddomain1.com", "cleaneddomain2.co.uk"]
     """
 
     response = llm_manager.query(prompt)
@@ -622,9 +632,66 @@ def filter_relevant_domains(
             else:
                 return domains
 
-        filtered = [d for d in domains if d["domain"] in relevant_domains]
-        return filtered if filtered else domains
+        # Consolidate cleaned domains and merge their data
+        domain_map = {}
+        for original_domain in domains:
+            # Find if this domain has a cleaned version
+            cleaned_version = None
+            for clean_domain in relevant_domains:
+                if clean_domain.replace(".", "").replace("-", "") in original_domain[
+                    "domain"
+                ].replace(".", "").replace("-", ""):
+                    cleaned_version = clean_domain
+                    break
+
+            if cleaned_version:
+                if cleaned_version not in domain_map:
+                    domain_map[cleaned_version] = {
+                        "domain": cleaned_version,
+                        "email_count": 0,
+                        "source_count": 0,
+                        "confidence": 0.0,
+                        "from_llm": False,
+                        "mx_valid": False,
+                    }
+
+                # Merge data from all versions of this domain
+                domain_map[cleaned_version]["email_count"] += original_domain[
+                    "email_count"
+                ]
+                domain_map[cleaned_version]["source_count"] += original_domain[
+                    "source_count"
+                ]
+                domain_map[cleaned_version]["from_llm"] = (
+                    domain_map[cleaned_version]["from_llm"]
+                    or original_domain["from_llm"]
+                )
+                domain_map[cleaned_version]["mx_valid"] = (
+                    domain_map[cleaned_version]["mx_valid"]
+                    or original_domain["mx_valid"]
+                )
+
+        # Recalculate confidence scores after consolidation
+        for domain_data in domain_map.values():
+            confidence = 0.0
+            if domain_data["from_llm"]:
+                confidence += 0.4  # Higher weight for LLM suggestions
+            if domain_data["email_count"] > 0:
+                confidence += min(0.4, domain_data["email_count"] * 0.05)
+            if domain_data["source_count"] > 0:
+                confidence += min(0.3, domain_data["source_count"] * 0.03)
+
+            # Bonus for likely official domains
+            if any(
+                word in domain_data["domain"] for word in company_name.lower().split()
+            ):
+                confidence += 0.2
+
+            domain_data["confidence"] = round(min(1.0, confidence), 3)
+
+        return list(domain_map.values()) if domain_map else domains
     except Exception:
+        return domains
         return domains
 
 
@@ -678,26 +745,29 @@ class DomainFinder:
         # Scrape pages
         scraped_data = self.web_scraper.scrape_all(search_results)
 
-        # Validate domains
-        all_domains = (
-            list(scraped_data["domain_sources"].keys())
-            + company_info.likely_email_domains
-        )
-        all_domains = list(set(all_domains))
-        mx_results = self.domain_validator.validate_domains(all_domains)
-
-        # Analyze domains
+        # Analyze domains (without MX filtering yet)
         domain_analysis = self.domain_validator.analyze_domains(
-            scraped_data, company_info.likely_email_domains, mx_results
+            scraped_data, company_info.likely_email_domains, {}
         )
 
-        # Filter for relevance
+        # Filter for relevance with company research context (includes cleaning)
         domain_dicts = [d.model_dump() for d in domain_analysis]
         filtered_dicts = filter_relevant_domains(
-            company_query, domain_dicts, self.llm_manager
+            company_query, domain_dicts, self.llm_manager, company_info
         )
 
-        return [DomainResult(**d) for d in filtered_dicts]
+        # Convert back to DomainResult objects
+        filtered_results = [DomainResult(**d) for d in filtered_dicts]
+
+        # Final MX lookup validation - remove domains without valid MX records
+        final_results = []
+        for result in filtered_results:
+            if self.domain_validator.has_mx_record(result.domain):
+                result.mx_valid = True
+                final_results.append(result)
+
+        # Re-sort by confidence after MX filtering
+        return sorted(final_results, key=lambda x: x.confidence, reverse=True)
 
 
 # ============================================================================
