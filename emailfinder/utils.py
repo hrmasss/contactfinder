@@ -1,14 +1,8 @@
 import re
-import sys
-from pathlib import Path
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from domainfinder.utils import _clean_domain_text
+from .imports import clean_domain
 
 
-def _clean_email(email: str) -> str:
+def clean_email(email: str) -> str:
     """Clean and validate email address"""
     if not email:
         return ""
@@ -21,7 +15,7 @@ def _clean_email(email: str) -> str:
 
     try:
         local, domain = email.split("@")
-        domain = _clean_domain_text(domain)
+        domain = clean_domain(domain)
 
         # Clean local part
         local = re.sub(r"[^\w\.\-\+]", "", local)

@@ -1,14 +1,7 @@
 import os
-import sys
-from pathlib import Path
 from typing import List, Dict, Any
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from .schema import EmailResult
-from domainfinder import DomainFinder
-from domainfinder.llm import LLMManager
+from .imports import DomainFinder, LLMManager
 from .llm import (
     research_employee_emails,
     scrape_employee_emails,

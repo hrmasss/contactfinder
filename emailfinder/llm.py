@@ -1,15 +1,9 @@
 import re
 import requests
-import sys
-from pathlib import Path
 from typing import List, Dict, Any
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from .schema import EmailResult
-from .utils import _clean_email
-from domainfinder.llm import LLMManager
+from .utils import clean_email
+from .imports import LLMManager
 
 
 def research_employee_emails(
@@ -169,7 +163,7 @@ def scrape_employee_emails(
                     found_emails = re.findall(email_pattern, text)
 
                     for email in found_emails:
-                        cleaned = _clean_email(email)
+                        cleaned = clean_email(email)
                         if cleaned and any(domain in cleaned for domain in domains):
                             all_emails.add(cleaned)
 
@@ -197,7 +191,7 @@ def filter_and_rank_emails(
                 continue
 
             # Clean email
-            cleaned_email = _clean_email(email)
+            cleaned_email = clean_email(email)
             if not cleaned_email:
                 continue
 

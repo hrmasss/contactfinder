@@ -23,7 +23,7 @@ from langchain_community.utilities import GoogleSerperAPIWrapper
 # ============================================================================
 
 
-def _clean_domain_text(domain: str) -> str:
+def clean_domain(domain: str) -> str:
     """Basic domain cleaning - keep it simple"""
     if not domain:
         return ""
@@ -352,7 +352,7 @@ class WebScraper:
 
             try:
                 local_part, domain = email.split("@", 1)
-                cleaned_domain = _clean_domain_text(domain)
+                cleaned_domain = clean_domain(domain)
 
                 if cleaned_domain and "." in cleaned_domain and len(cleaned_domain) > 3:
                     filtered.add(f"{local_part}@{cleaned_domain}")
@@ -403,7 +403,7 @@ class WebScraper:
                     if "@" in email:
                         try:
                             domain = email.split("@")[1]
-                            cleaned_domain = _clean_domain_text(domain)
+                            cleaned_domain = clean_domain(domain)
 
                             if cleaned_domain and "." in cleaned_domain:
                                 domain_sources.setdefault(cleaned_domain, []).append(
@@ -421,7 +421,7 @@ class DomainValidator:
     def has_mx_record(self, domain: str) -> bool:
         """Check if domain has valid MX or A records"""
         try:
-            domain = _clean_domain_text(domain)
+            domain = clean_domain(domain)
             if not domain:
                 return False
 
@@ -459,7 +459,7 @@ class DomainValidator:
             if "@" in email:
                 try:
                     domain = email.split("@")[1]
-                    domain = _clean_domain_text(domain)
+                    domain = clean_domain(domain)
                     if domain:
                         domain_counts[domain] += 1
                 except Exception:
@@ -467,7 +467,7 @@ class DomainValidator:
 
         # Add LLM-suggested domains
         for domain in llm_domains:
-            domain = _clean_domain_text(domain)
+            domain = clean_domain(domain)
             if domain:
                 domain_counts[domain] = domain_counts.get(domain, 0)
 

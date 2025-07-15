@@ -23,20 +23,18 @@ def main():
     # Custom: gpt -> gemini
     provider_order = ["gpt", "gemini"]
 
+    # Test data
+    company = "Open AI"
+    company_context = {}
+    employee = "Sam Altman"
+    employee_context = {}
+
     # Initialize domain finder
     domain_finder = DomainFinder(provider_order=provider_order)
 
     # Test domain finder
     print("🔍 DOMAIN FINDER TEST")
     print("=" * 50)
-
-    # Test company
-    company = "OpenAI"
-    context = {
-        "industry": "AI Technology",
-        "location": "San Francisco",
-        "website": "openai.com",
-    }
 
     # Start spinner
     stop_spinner = threading.Event()
@@ -45,7 +43,7 @@ def main():
 
     try:
         start_time = time.time()
-        results = domain_finder.find_domains(company, context=context)
+        results = domain_finder.find_domains(company, context=company_context)
         stop_spinner.set()
         spinner_thread.join()
 
@@ -83,12 +81,6 @@ def main():
     # Initialize email finder
     email_finder = EmailFinder(provider_order=provider_order)
 
-    # Test employee
-    employee_name = "Sam Altman"
-    company_name = "OpenAI"
-
-    employee_context = {"title": "CEO", "department": "Executive"}
-
     # Start spinner
     stop_spinner = threading.Event()
     spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
@@ -97,9 +89,9 @@ def main():
     try:
         start_time = time.time()
         email_results = email_finder.find_emails(
-            employee_name,
-            company_name,
-            company_context=context,
+            employee_name=employee,
+            company_name=company,
+            company_context=company_context,
             employee_context=employee_context,
             max_results=10,
         )
