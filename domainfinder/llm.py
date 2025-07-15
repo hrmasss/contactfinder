@@ -88,18 +88,24 @@ Company Research Context:
     2. Keep only domains DIRECTLY related to "{company_name}"
     3. Use the company research context to make informed decisions
     
-    REMOVE:
+    STRICTLY REMOVE:
     - Generic domains (gmail, yahoo, hotmail, outlook)
-    - Unrelated companies
-    - Personal domains
-    - Domains with completely different business focus
+    - Lead generation/scraping services (leadiq, zoominfo, apollo, rocketreach, hunter, clearbit, prospectstack, etc.)
+    - Business directory sites (yellowpages, yelp, linkedin, crunchbase, etc.)
+    - Social media platforms (facebook, twitter, instagram, etc.)
+    - Unrelated companies with different business focus
+    - Personal domains (individual names not matching company)
+    - Job boards and recruiting sites
+    - Marketing/advertising platforms
+    - Any domain that provides leads/contact info about companies rather than being the company itself
     
     KEEP AND CLEAN:
     - Primary company domains (clean up if malformed)
     - Official website domain and its variations
-    - Subsidiary domains
-    - Department/division domains
+    - Subsidiary domains (clearly related to main company)
+    - Department/division domains (hr.company.com, sales.company.com)
     - Regional domains (compound TLDs like .co.uk, .edu.bd)
+    - Domains that ARE the company, not domains that talk ABOUT the company
     
     Return ONLY a JSON array of cleaned, relevant domain names:
     ["cleaneddomain1.com", "cleaneddomain2.co.uk"]
