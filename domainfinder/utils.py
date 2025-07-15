@@ -1,6 +1,6 @@
-import json
 import re
 import time
+import json
 import requests
 import dns.resolver
 from typing import List, Dict, Set
@@ -10,15 +10,23 @@ from .schema import LLMResponse, SearchResult, DomainResult
 
 
 class LLMManager:
-    def __init__(self):
-        self.providers = []
+    def __init__(self, provider_order: List[str] = None):
+        self.provider_order = provider_order or ["gemini", "gpt"]
+        self.providers = {}
         self._setup_providers()
 
     def _setup_providers(self):
         try:
             from agents.gemini import gemini
 
-            self.providers.append(("gemini", gemini))
+            self.providers["gemini"] = gemini
+        except ImportError:
+            pass
+
+        try:
+            from agents.gpt import gpt
+
+            self.providers["gpt"] = gpt
         except ImportError:
             pass
 
@@ -77,16 +85,20 @@ class LLMManager:
     def query(self, prompt: str, max_providers: int = 2) -> LLMResponse:
         providers_tried = 0
 
-        for provider_name, provider_func in self.providers:
-            if providers_tried >= max_providers:
-                break
+        for provider_name in self.provider_order:
+            if providers_tried >= max_providers or provider_name not in self.providers:
+                continue
 
-            response = self._call_provider(provider_name, provider_func, prompt)
+            response = self._call_provider(
+                provider_name, self.providers[provider_name], prompt
+            )
             providers_tried += 1
 
             if response.success:
+                print(f"Using {provider_name.upper()}")
                 return response
 
+            print(f"{provider_name.upper()} failed: {response.error}")
             time.sleep(1)
 
         return LLMResponse(success=False, error="All providers failed", provider="none")

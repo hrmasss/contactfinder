@@ -6,12 +6,12 @@ from .llm import research_company, filter_relevant_domains
 
 
 class DomainFinder:
-    def __init__(self, serper_api_key: str = None):
+    def __init__(self, serper_api_key: str = None, provider_order: List[str] = None):
         self.serper_api_key = serper_api_key or os.getenv("SERPER_API_KEY")
         if not self.serper_api_key:
             raise ValueError("SERPER_API_KEY is required")
 
-        self.llm_manager = LLMManager()
+        self.llm_manager = LLMManager(provider_order)
         self.web_scraper = WebScraper(self.serper_api_key)
         self.domain_validator = DomainValidator()
 
