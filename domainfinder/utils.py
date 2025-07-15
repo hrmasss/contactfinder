@@ -380,22 +380,30 @@ class DomainValidator:
             source_count = len(domain_sources.get(domain, []))
             from_llm = domain in llm_domains
 
+            # Improved confidence scoring that gives more weight to email count
             confidence = 0.0
 
-            # Base score for LLM suggestions
+            # Base score for LLM suggestions (company research)
             if from_llm:
-                confidence += 0.4
+                confidence += 0.3
 
             # Email count bonus
             if email_count > 0:
-                confidence += min(0.3, email_count * 0.05)
+                # More generous scoring for email count
+                confidence += min(0.4, email_count * 0.01)
+
+                # Bonus for domains with many emails
+                if email_count >= 10:
+                    confidence += 0.15
+                elif email_count >= 5:
+                    confidence += 0.1
 
             # Source diversity bonus
             if source_count > 0:
-                confidence += min(0.2, source_count * 0.03)
+                confidence += min(0.2, source_count * 0.02)
 
             # Domain name relevance bonus
-            confidence += 0.1
+            confidence += 0.1  # Base relevance score
 
             results.append(
                 DomainResult(

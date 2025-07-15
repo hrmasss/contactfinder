@@ -481,18 +481,25 @@ class DomainValidator:
 
             # Base score for LLM suggestions (company research)
             if from_llm:
-                confidence += 0.4
+                confidence += 0.3
 
-            # Email count bonus (but not overwhelming)
+            # Email count bonus
             if email_count > 0:
-                confidence += min(0.3, email_count * 0.03)
+                # More generous scoring for email count
+                confidence += min(0.4, email_count * 0.01)
+
+                # Bonus for domains with many emails
+                if email_count >= 10:
+                    confidence += 0.15
+                elif email_count >= 5:
+                    confidence += 0.1
 
             # Source diversity bonus
             if source_count > 0:
                 confidence += min(0.2, source_count * 0.02)
 
             # Domain name relevance bonus
-            confidence += 0.1
+            confidence += 0.1  # Base relevance score
 
             results.append(
                 DomainResult(
@@ -681,11 +688,21 @@ Company Research Context:
         for domain_data in domain_map.values():
             confidence = 0.0
             if domain_data["from_llm"]:
-                confidence += 0.4  # Higher weight for LLM suggestions
+                confidence += 0.3  # LLM suggestions (company research)
+
+            # Higher weight for email count (main working email domain indicator)
             if domain_data["email_count"] > 0:
-                confidence += min(0.4, domain_data["email_count"] * 0.05)
+                # More generous scoring for email count since it indicates actual usage
+                confidence += min(0.5, domain_data["email_count"] * 0.015)
+
+                # Bonus for domains with many emails (likely main email domain)
+                if domain_data["email_count"] >= 10:
+                    confidence += 0.1
+                elif domain_data["email_count"] >= 5:
+                    confidence += 0.05
+
             if domain_data["source_count"] > 0:
-                confidence += min(0.3, domain_data["source_count"] * 0.03)
+                confidence += min(0.2, domain_data["source_count"] * 0.02)
 
             # Bonus for likely official domains
             if any(
@@ -697,7 +714,6 @@ Company Research Context:
 
         return list(domain_map.values()) if domain_map else domains
     except Exception:
-        return domains
         return domains
 
 
