@@ -4,6 +4,8 @@ import time
 import json
 import requests
 import dns.resolver
+import threading
+import dotenv
 from bs4 import BeautifulSoup
 from collections import Counter
 from typing import List, Dict, Set, Any, Optional
@@ -921,6 +923,8 @@ Focus on QUALITY over quantity. Better to return fewer, more likely emails than 
                     if isinstance(value, list) and value:
                         result = value
                         break
+        else:
+            result = []
 
         # Ensure we have at least one result
         if not result:
@@ -1354,32 +1358,52 @@ class ContactFinder:
 
 def find_contact_info(
     company_name: str,
-    employee_name: Optional[str] = None,
     company_context: Dict[str, Any] = None,
-    employee_context: Dict[str, Any] = None,
     max_results: int = 5,
-) -> ContactFinderResult:
+) -> List[str]:
     """
-    Main contact finder function - unified interface for both company and employee search.
+    Main contact finder function.
 
     Args:
         company_name: Name of the company to search for
-        employee_name: Name of the employee (optional)
         company_context: Additional context for company identification
-        employee_context: Additional context for employee identification
         max_results: Maximum number of results to return
 
     Returns:
-        ContactFinderResult with consistent schema
+        List of domain strings sorted by confidence with subdomains following their parent domains
     """
     finder = ContactFinder()
-    return finder.find_contacts(
+    result = finder.find_contacts(
         company_name=company_name,
-        employee_name=employee_name,
+        employee_name=None,  # Force company-only search
         company_context=company_context,
-        employee_context=employee_context,
+        employee_context=None,  # Ignore employee context
         max_results=max_results,
     )
+
+    # Create a flat list with subdomains following their parent domains
+    ordered_domains = []
+
+    # Add main domains first, then their subdomains
+    for domain in result.likely_email_domains:
+        ordered_domains.append(domain)
+
+        # Add subdomains for this domain
+        for subdomain in result.sub_mail_domains:
+            # Check if subdomain belongs to this domain
+            if subdomain.endswith(f".{domain}") or subdomain == domain:
+                if subdomain not in ordered_domains:
+                    ordered_domains.append(subdomain)
+
+    # Add any remaining subdomains that weren't matched
+    for subdomain in result.sub_mail_domains:
+        if subdomain not in ordered_domains:
+            ordered_domains.append(subdomain)
+
+    # Remove duplicates while preserving order
+    unique_domains = list(dict.fromkeys(ordered_domains))
+
+    return unique_domains
 
 
 # ============================================================================
@@ -1393,7 +1417,8 @@ def test_company_only(company: str, company_context: Dict[str, Any] = None):
     print("=" * 50)
 
     try:
-        result = find_contact_info(
+        finder = ContactFinder()
+        result = finder.find_contacts(
             company_name=company,
             company_context=company_context,
         )
@@ -1434,7 +1459,8 @@ def test_company_with_employee(
     print("=" * 50)
 
     try:
-        result = find_contact_info(
+        finder = ContactFinder()
+        result = finder.find_contacts(
             company_name=company,
             employee_name=employee,
             company_context=company_context,
@@ -1535,7 +1561,8 @@ if __name__ == "__main__":
         try:
             start_time = time.time()
             test_company_only(
-                employee_context=employee_context, company_context=company_context
+                company=company,
+                company_context=company_context,
             )
             stop_spinner.set()
             spinner_thread.join()
