@@ -1380,3 +1380,169 @@ def find_contact_info(
         employee_context=employee_context,
         max_results=max_results,
     )
+
+
+# ============================================================================
+# TEST CODE
+# ============================================================================
+
+
+def test_company_only(company: str, company_context: Dict[str, Any] = None):
+    """Test company-only search"""
+    print("🏢 COMPANY-ONLY SEARCH TEST")
+    print("=" * 50)
+
+    try:
+        result = find_contact_info(
+            company_name=company,
+            company_context=company_context,
+        )
+
+        print(f"✅ Company: {result.company_name}")
+        print(f"🌐 Website: {result.website}")
+        print(f"📊 Description: {result.description}")
+        print(f"🔍 Found {len(result.likely_email_domains)} domains:")
+        for i, domain in enumerate(result.likely_email_domains[:5], 1):
+            print(f"  {i}. {domain}")
+
+        print(f"📧 Email patterns ({len(result.email_patterns)}):")
+        for i, pattern in enumerate(result.email_patterns[:3], 1):
+            print(f"  {i}. {pattern}")
+
+        print(f"🌍 Subdomains ({len(result.sub_mail_domains)}):")
+        for i, subdomain in enumerate(result.sub_mail_domains[:5], 1):
+            print(f"  {i}. {subdomain}")
+
+        print(f"👤 Employee info: {result.employee_name or 'None'}")
+        print(f"📬 Employee emails: {len(result.likely_email_addresses)}")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+def test_company_with_employee(
+    company: str,
+    employee: str,
+    company_context: Dict[str, Any] = None,
+    employee_context: Dict[str, Any] = None,
+):
+    """Test company + employee search"""
+    print("\n👤 COMPANY + EMPLOYEE SEARCH TEST")
+    print("=" * 50)
+
+    try:
+        result = find_contact_info(
+            company_name=company,
+            employee_name=employee,
+            company_context=company_context,
+            employee_context=employee_context,
+        )
+
+        print(f"✅ Company: {result.company_name}")
+        print(f"🌐 Website: {result.website}")
+        print(f"📊 Description: {result.description}")
+        print(f"🔍 Found {len(result.likely_email_domains)} domains:")
+        for i, domain in enumerate(result.likely_email_domains[:3], 1):
+            print(f"  {i}. {domain}")
+
+        print(f"📧 Email patterns ({len(result.email_patterns)}):")
+        for i, pattern in enumerate(result.email_patterns[:3], 1):
+            print(f"  {i}. {pattern}")
+
+        print(f"🌍 Subdomains ({len(result.sub_mail_domains)}):")
+        for i, subdomain in enumerate(result.sub_mail_domains[:3], 1):
+            print(f"  {i}. {subdomain}")
+
+        print(f"👤 Employee: {result.employee_name}")
+        print(f"📝 Employee description: {result.employee_description}")
+        print(f"📬 Found {len(result.likely_email_addresses)} likely emails:")
+        for i, email in enumerate(result.likely_email_addresses[:5], 1):
+            print(
+                f"  {i}. {email.email} ({email.confidence:.3f}) - {email.pattern_type}"
+            )
+
+        if result.likely_email_addresses:
+            print(f"💡 Best email: {result.likely_email_addresses[0].email}")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    import time
+    import dotenv
+    import threading
+
+    # Load environment variables
+    dotenv.load_dotenv()
+
+    # Check if required API keys are available
+    os.environ["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY")
+    os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+    os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
+
+    def loading_spinner(stop_event):
+        """Show a loading spinner while processing"""
+        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        i = 0
+        while not stop_event.is_set():
+            print(f"\r{spinner[i % len(spinner)]} Processing...", end="", flush=True)
+            time.sleep(0.1)
+            i += 1
+
+    company = "ABB"
+    employee = "Kevin Durocher"
+    company_context = {}
+    employee_context = {}
+
+    print("🧪 CONTACT FINDER MONOLITH TESTS")
+    print("=" * 60)
+
+    if company and employee:
+        print("⚡ Starting Test: Company + employee search...")
+        stop_spinner = threading.Event()
+        spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
+        spinner_thread.start()
+
+        try:
+            start_time = time.time()
+            test_company_with_employee(
+                employee=employee,
+                company=company,
+                employee_context=employee_context,
+                company_context=company_context,
+            )
+            stop_spinner.set()
+            spinner_thread.join()
+            print(f"\r✅ Test 2 completed in {time.time() - start_time:.2f}s\n")
+        except Exception as e:
+            stop_spinner.set()
+            spinner_thread.join()
+            print(f"\r❌ Test 2 failed: {e}\n")
+        print("🎉 All tests completed!")
+    elif company:
+        print("\n⚡ Starting Test: Company-only search...")
+        stop_spinner = threading.Event()
+        spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
+        spinner_thread.start()
+
+        try:
+            start_time = time.time()
+            test_company_only(
+                employee_context=employee_context, company_context=company_context
+            )
+            stop_spinner.set()
+            spinner_thread.join()
+            print(f"\r✅ Test 1 completed in {time.time() - start_time:.2f}s\n")
+        except Exception as e:
+            stop_spinner.set()
+            spinner_thread.join()
+            print(f"\r❌ Test 1 failed: {e}\n")
+    else:
+        print("⚠️ No valid input provided.")
