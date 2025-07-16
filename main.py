@@ -101,7 +101,7 @@ def main():
             company_name=company,
             company_context=company_context,
             employee_context=employee_context,
-            max_results=10,
+            max_results=5,
         )
         stop_spinner.set()
         spinner_thread.join()

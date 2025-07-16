@@ -40,7 +40,7 @@ class EmailFinder:
         company_name: str,
         company_context: Dict[str, Any] = None,
         employee_context: Dict[str, Any] = None,
-        max_results: int = 15,
+        max_results: int = 5,
     ) -> List[EmailResult]:
         """Find and rank email addresses for an employee
 
@@ -59,7 +59,7 @@ class EmailFinder:
 
         # Step 1: Get top 3 domains using domain finder
         domain_results = self.domain_finder.find_domains(
-            company_name, max_results=30, context=company_context
+            company_name, max_results=5, context=company_context
         )
 
         if not domain_results:
@@ -77,7 +77,7 @@ class EmailFinder:
             employee_name,
             top_domains,
             self.serper_api_key,
-            max_results=30,
+            max_results=5,
         )
 
         # Step 3: Research with LLM

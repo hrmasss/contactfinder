@@ -282,7 +282,7 @@ class WebScraper:
         }
 
     def search_emails(
-        self, company_name: str, max_results: int = 30
+        self, company_name: str, max_results: int = 5
     ) -> List[SearchResult]:
         queries = [
             f'"{company_name}" email contact',
@@ -745,7 +745,7 @@ class DomainFinder:
         self.domain_validator = DomainValidator()
 
     def find_domains(
-        self, company_query: str, max_results: int = 30, context: Dict[str, Any] = None
+        self, company_query: str, max_results: int = 5, context: Dict[str, Any] = None
     ) -> List[DomainResult]:
         """Find and rank domains by confidence score
 
@@ -798,13 +798,13 @@ class DomainFinder:
 
 
 def find_contact_info(
-    company_query: str, max_results: int = 30, context: Dict[str, Any] = None
+    company_query: str, max_results: int = 5, context: Dict[str, Any] = None
 ) -> List[str]:
     """Main contact finder pipeline, returns only domain list
 
     Args:
         company_query: Name of the company to search for
-        max_results: Maximum number of search results to process (default 30)
+        max_results: Maximum number of search results to process (default 5)
         context: Additional context to help identify the correct company
                 e.g., {"industry": "Technology", "location": "New York", "website": "..."}
 

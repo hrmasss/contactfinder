@@ -172,7 +172,7 @@ def scrape_employee_emails(
     employee_name: str,
     domains: List[str],
     serper_api_key: str,
-    max_results: int = 20,
+    max_results: int = 5,
 ) -> List[str]:
     """Scrape web for employee emails"""
 

@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict, Any
 from .schema import DomainResult
-from .utils import LLMManager, WebScraper, DomainValidator, clean_domain
+from .utils import LLMManager, WebScraper, DomainValidator
 from .llm import research_company, filter_relevant_domains
 
 
@@ -16,7 +16,7 @@ class DomainFinder:
         self.domain_validator = DomainValidator()
 
     def find_domains(
-        self, company_query: str, max_results: int = 30, context: Dict[str, Any] = None
+        self, company_query: str, max_results: int = 5, context: Dict[str, Any] = None
     ) -> List[DomainResult]:
         """Find and rank domains by confidence score
 
@@ -43,16 +43,9 @@ class DomainFinder:
             scraped_data, company_info.likely_email_domains, {}
         )
 
-        # Merge company research subdomain data
-        for result in domain_analysis:
-            # For main company domain, add all company research subdomains
-            for sub_domain in company_info.sub_mail_domains:
-                sub_domain = clean_domain(sub_domain)
-                if sub_domain and sub_domain.endswith(result.domain):
-                    result.sub_mail_domains.append(sub_domain)
-
-            # Remove duplicates and sort
-            result.sub_mail_domains = sorted(list(set(result.sub_mail_domains)))
+        # Debug output
+        print(f"DEBUG: Company research found sub_mail_domains: {company_info.sub_mail_domains}")
+        print(f"DEBUG: Domain analysis results: {[(r.domain, r.sub_mail_domains) for r in domain_analysis]}")
 
         # Filter for relevance with company research context
         domain_dicts = [d.model_dump() for d in domain_analysis]

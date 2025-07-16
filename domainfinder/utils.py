@@ -354,11 +354,114 @@ class DomainValidator:
     def analyze_domains(
         self, scraped_data: Dict, llm_domains: List[str], mx_results: Dict[str, bool]
     ) -> List[DomainResult]:
-        """Analyze and rank domains by confidence score"""
+        """Analyze and rank domains using LLM for complex subdomain analysis"""
         emails = scraped_data["emails"]
         domain_sources = scraped_data["domain_sources"]
+        
+        print(f"DEBUG: analyze_domains called with {len(emails)} emails")
+        print(f"DEBUG: LLM domains: {llm_domains}")
 
-        # Count email occurrences per domain
+        # Use LLM to analyze domain patterns and subdomains
+        llm_manager = LLMManager()
+        domain_analysis = self._get_llm_domain_analysis(llm_manager, emails, llm_domains)
+        
+        print(f"DEBUG: LLM domain analysis: {domain_analysis}")
+
+        # Build results from LLM analysis
+        results = []
+        for domain_info in domain_analysis:
+            domain = domain_info.get("domain", "")
+            if not domain:
+                continue
+                
+            # Get email count for this domain
+            email_count = sum(1 for email in emails if f"@{domain}" in email.lower())
+            
+            # Get source count
+            source_count = len(domain_sources.get(domain, []))
+            
+            # Check if from original LLM suggestions
+            from_llm = domain in llm_domains
+            
+            # Use confidence from LLM analysis
+            confidence = min(1.0, domain_info.get("confidence", 0.5))
+            
+            # Get cleaned subdomains from LLM
+            sub_domains = domain_info.get("sub_mail_domains", [])
+            
+            results.append(
+                DomainResult(
+                    domain=domain,
+                    email_count=email_count,
+                    source_count=source_count,
+                    confidence=confidence,
+                    from_llm=from_llm,
+                    mx_valid=False,
+                    sub_mail_domains=sub_domains,
+                )
+            )
+
+        print(f"DEBUG: Final results: {[(r.domain, r.sub_mail_domains) for r in results]}")
+        return sorted(results, key=lambda x: x.confidence, reverse=True)
+
+    def _get_llm_domain_analysis(self, llm_manager: LLMManager, emails: List[str], suggested_domains: List[str]) -> List[Dict]:
+        """Get LLM analysis of domain patterns and subdomains"""
+        prompt = f"""
+Analyze these email addresses and domain suggestions to identify the main company domains and their subdomains.
+
+EMAIL ADDRESSES FOUND:
+{chr(10).join(emails[:50])}  # Limit to first 50 for token efficiency
+
+SUGGESTED DOMAINS FROM COMPANY RESEARCH:
+{chr(10).join(suggested_domains)}
+
+INSTRUCTIONS:
+1. Group email domains by their main company domain (e.g., us.abb.com, ca.abb.com → main domain: abb.com)
+2. Clean up malformed domains (remove test emails, invalid domains, etc.)
+3. Identify relevant subdomains for each main domain
+4. Calculate confidence scores based on:
+   - Email frequency for this domain
+   - Relevance to company (avoid generic domains like gmail.com)
+   - Subdomain patterns indicating corporate structure
+5. Only include domains that appear legitimate and company-related
+
+Return a JSON array of domain objects:
+```json
+[
+  {{
+    "domain": "abb.com",
+    "confidence": 0.95,
+    "sub_mail_domains": ["us.abb.com", "ca.abb.com", "ch.abb.com"],
+    "reasoning": "Main corporate domain with regional subdomains"
+  }},
+  {{
+    "domain": "example.com", 
+    "confidence": 0.3,
+    "sub_mail_domains": [],
+    "reasoning": "Secondary domain with few emails"
+  }}
+]
+```
+
+Focus on finding the TOP 5 most relevant domains. Exclude generic email providers (gmail, outlook, etc.).
+"""
+
+        response = llm_manager.query(prompt)
+        
+        if response.success and response.data:
+            # Handle both direct array and nested data structure
+            domain_data = response.data
+            if isinstance(domain_data, dict) and "domains" in domain_data:
+                return domain_data["domains"]
+            elif isinstance(domain_data, list):
+                return domain_data
+                
+        # Fallback to basic analysis if LLM fails
+        print("DEBUG: LLM domain analysis failed, using fallback")
+        return self._fallback_domain_analysis(emails, suggested_domains)
+
+    def _fallback_domain_analysis(self, emails: List[str], suggested_domains: List[str]) -> List[Dict]:
+        """Fallback domain analysis when LLM fails"""
         domain_counts = Counter()
         subdomain_map = {}
 
@@ -370,72 +473,36 @@ class DomainValidator:
                     if domain:
                         domain_counts[domain] += 1
 
-                        # Track subdomain patterns - group by main domain
                         if domain.count(".") > 1:  # Has subdomain
                             main_domain = ".".join(domain.split(".")[-2:])
                             if main_domain not in subdomain_map:
                                 subdomain_map[main_domain] = set()
                             subdomain_map[main_domain].add(domain)
                         else:
-                            # For main domains, initialize empty set if not exists
                             if domain not in subdomain_map:
                                 subdomain_map[domain] = set()
                 except Exception:
                     continue
 
-        # Add LLM-suggested domains
-        for domain in llm_domains:
+        # Add suggested domains
+        for domain in suggested_domains:
             domain = clean_domain(domain)
             if domain:
                 domain_counts[domain] = domain_counts.get(domain, 0)
-                # Initialize subdomain map for LLM domains
                 if domain not in subdomain_map:
                     subdomain_map[domain] = set()
 
-        # Calculate confidence scores for all domains
+        # Build results
         results = []
         for domain, email_count in domain_counts.items():
-            source_count = len(domain_sources.get(domain, []))
-            from_llm = domain in llm_domains
-
-            # Improved confidence scoring that gives more weight to email count
-            confidence = 0.0
-
-            # Base score for LLM suggestions (company research)
-            if from_llm:
-                confidence += 0.3
-
-            # Email count bonus
-            if email_count > 0:
-                # More generous scoring for email count
-                confidence += min(0.4, email_count * 0.01)
-
-                # Bonus for domains with many emails
-                if email_count >= 10:
-                    confidence += 0.15
-                elif email_count >= 5:
-                    confidence += 0.1
-
-            # Source diversity bonus
-            if source_count > 0:
-                confidence += min(0.2, source_count * 0.02)
-
-            # Domain name relevance bonus
-            confidence += 0.1  # Base relevance score
-
-            # Get subdomain list for this domain
+            confidence = min(1.0, 0.3 + (email_count * 0.01))
             sub_domains = list(subdomain_map.get(domain, set()))
+            
+            results.append({
+                "domain": domain,
+                "confidence": confidence,
+                "sub_mail_domains": sub_domains,
+                "reasoning": f"Fallback analysis - {email_count} emails found"
+            })
 
-            results.append(
-                DomainResult(
-                    domain=domain,
-                    email_count=email_count,
-                    source_count=source_count,
-                    confidence=round(min(1.0, confidence), 3),
-                    from_llm=from_llm,
-                    mx_valid=False,
-                    sub_mail_domains=sub_domains,
-                )
-            )
-
-        return sorted(results, key=lambda x: x.confidence, reverse=True)
+        return sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
