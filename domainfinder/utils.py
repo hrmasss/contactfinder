@@ -370,12 +370,16 @@ class DomainValidator:
                     if domain:
                         domain_counts[domain] += 1
 
-                        # Track subdomain patterns
+                        # Track subdomain patterns - group by main domain
                         if domain.count(".") > 1:  # Has subdomain
                             main_domain = ".".join(domain.split(".")[-2:])
                             if main_domain not in subdomain_map:
                                 subdomain_map[main_domain] = set()
                             subdomain_map[main_domain].add(domain)
+                        else:
+                            # For main domains, initialize empty set if not exists
+                            if domain not in subdomain_map:
+                                subdomain_map[domain] = set()
                 except Exception:
                     continue
 
@@ -384,6 +388,9 @@ class DomainValidator:
             domain = clean_domain(domain)
             if domain:
                 domain_counts[domain] = domain_counts.get(domain, 0)
+                # Initialize subdomain map for LLM domains
+                if domain not in subdomain_map:
+                    subdomain_map[domain] = set()
 
         # Calculate confidence scores for all domains
         results = []
@@ -417,7 +424,7 @@ class DomainValidator:
             confidence += 0.1  # Base relevance score
 
             # Get subdomain list for this domain
-            sub_domains = list(subdomain_map.get(domain, []))
+            sub_domains = list(subdomain_map.get(domain, set()))
 
             results.append(
                 DomainResult(

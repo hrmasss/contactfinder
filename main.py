@@ -21,7 +21,7 @@ def main():
     # Default: gemini -> gpt
     # provider_order = ["gemini", "gpt"]
     # Custom: gpt -> gemini
-    provider_order = ["gemini"]
+    provider_order = ["gpt", "gemini"]
 
     # Test data
     company = "ABB"

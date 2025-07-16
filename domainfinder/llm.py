@@ -26,7 +26,14 @@ def research_company(
         "sub_mail_domains": ["us.domain.com", "ca.domain.com"]
     }}
     
-    IMPORTANT: Only include sub_mail_domains if you find evidence that the company uses regional/departmental subdomains for email addresses (like us.company.com, ca.company.com). Leave empty if no such pattern exists.
+    IMPORTANT: Only include sub_mail_domains if you find evidence that the company uses regional/departmental subdomains for email addresses. 
+    
+    Research the company's email structure to identify if they use patterns like:
+    - Regional subdomains (us.company.com, ca.company.com, uk.company.com)
+    - Country-specific subdomains (in.company.com, de.company.com, fr.company.com)
+    - Departmental subdomains (hr.company.com, sales.company.com)
+    
+    Leave empty if no such pattern exists.
     
     Return ONLY the JSON object, no other text.
     """

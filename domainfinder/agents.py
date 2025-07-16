@@ -3,6 +3,7 @@ from google.genai import types
 from langchain_core.tools import Tool
 from langchain.chat_models import init_chat_model
 from langgraph.prebuilt import create_react_agent
+from langchain_core.runnables import RunnableConfig
 from langchain_community.utilities import GoogleSerperAPIWrapper
 
 
@@ -12,14 +13,15 @@ def gemini(prompt: str) -> str:
     grounding_tool = types.Tool(google_search=types.GoogleSearch())
     config = types.GenerateContentConfig(tools=[grounding_tool])
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
         config=config,
     )
     return response.text
 
 
-def gpt(prompt: str, model: str = "gpt-4o-mini") -> str:
+# use gpt 4.1 mini
+def gpt(prompt: str, model: str = "gpt-4.1-mini") -> str:
     """GPT agent with search capabilities using langchain"""
 
     llm = init_chat_model(model, model_provider="openai", temperature=0)
@@ -38,6 +40,7 @@ def gpt(prompt: str, model: str = "gpt-4o-mini") -> str:
     events = agent.stream(
         {"messages": [("user", prompt)]},
         stream_mode="values",
+        config=RunnableConfig(recursion_limit=100),
     )
 
     # Get the last message from the agent
