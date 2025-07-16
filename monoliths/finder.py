@@ -399,28 +399,37 @@ class ContactFinder:
         return valid_domains[:10]
 
     def _extract_patterns(self, emails: List[str]) -> List[str]:
-        """Extract common email patterns"""
-        patterns = set()
+        """Extract common email patterns using LLM research"""
 
-        for email in emails:
-            if "@" in email:
-                local = email.split("@")[0]
-                if "." in local:
-                    patterns.add("firstname.lastname@domain.com")
-                elif len(local) > 6:
-                    patterns.add("firstnamelastname@domain.com")
-                else:
-                    patterns.add("firstname@domain.com")
+        prompt = """
+        Research common email patterns used by business organizations.
+        
+        Task: Identify 3-5 most common corporate email patterns used by companies.
+        
+        Return JSON array of patterns (use generic terms):
+        ["firstname.lastname@domain.com", "firstname@domain.com", "f.lastname@domain.com"]
+        """
 
-        # Add common patterns if none found
-        if not patterns:
-            patterns = {
-                "firstname.lastname@domain.com",
-                "firstname@domain.com",
-                "f.lastname@domain.com",
-            }
+        result = self.llm.query(prompt)
 
-        return list(patterns)
+        if result and isinstance(result, dict):
+            # Handle different response formats
+            if "patterns" in result:
+                return result["patterns"][:5]  # Max 5 patterns
+            elif isinstance(result, list):
+                return result[:5]
+            else:
+                # Extract any list value from the response
+                for value in result.values():
+                    if isinstance(value, list):
+                        return value[:5]
+
+        # Fallback patterns if LLM fails
+        return [
+            "firstname.lastname@domain.com",
+            "firstname@domain.com",
+            "f.lastname@domain.com",
+        ]
 
     def _find_employee_emails(
         self,
@@ -510,7 +519,7 @@ class ContactFinder:
     def _generate_employee_emails(
         self, employee_name: str, domains: List[str]
     ) -> List[EmailResult]:
-        """Generate email patterns for employee"""
+        """Generate email patterns for employee using discovered patterns"""
         if not domains:
             return []
 
@@ -520,31 +529,88 @@ class ContactFinder:
 
         first, last = name_parts[0], name_parts[-1]
 
-        patterns = [
+        # Use LLM to generate patterns based on employee name and domains
+        prompt = f"""
+        Employee: "{employee_name}"
+        Company domains: {domains[:2]}
+        
+        Generate 10-15 most likely email addresses for this employee.
+        Use common business email patterns like:
+        - firstname.lastname
+        - firstname
+        - f.lastname
+        - firstnamelastname
+        - firstname_lastname
+        
+        Return JSON array of email objects:
+        [
+          {{"email": "john.doe@company.com", "confidence": 0.8}},
+          {{"email": "john@company.com", "confidence": 0.6}}
+        ]
+        """
+
+        result = self.llm.query(prompt)
+
+        if result and isinstance(result, dict):
+            # Handle different response formats
+            emails_data = None
+            if "emails" in result:
+                emails_data = result["emails"]
+            elif isinstance(result, list):
+                emails_data = result
+            else:
+                # Extract any list value from the response
+                for value in result.values():
+                    if isinstance(value, list):
+                        emails_data = value
+                        break
+
+            if emails_data:
+                results = []
+                for item in emails_data[:15]:  # Max 15 emails
+                    if isinstance(item, dict):
+                        email = item.get("email", "")
+                        confidence = item.get("confidence", 0.5)
+                    else:
+                        email = str(item)
+                        confidence = 0.5
+
+                    if email and "@" in email:
+                        domain = email.split("@")[1]
+                        results.append(
+                            EmailResult(
+                                email=email,
+                                confidence=confidence,
+                                pattern_type="generated",
+                                domain=domain,
+                            )
+                        )
+
+                if results:
+                    return results
+
+        # Fallback to simple patterns if LLM fails
+        simple_patterns = [
             f"{first}.{last}",
             f"{first}",
             f"{last}",
             f"{first}{last}",
             f"{first[0]}.{last}",
-            f"{first}.{last[0]}",
-            f"{first[0]}{last}",
-            f"{first}_{last}",
-            f"{first}-{last}",
         ]
 
         results = []
         for domain in domains[:2]:  # Use top 2 domains
-            for i, pattern in enumerate(patterns):
+            for i, pattern in enumerate(simple_patterns):
                 email = f"{pattern}@{domain}"
                 confidence = 0.5 - (
-                    i * 0.02
+                    i * 0.05
                 )  # Decrease confidence for less common patterns
 
                 results.append(
                     EmailResult(
                         email=email,
                         confidence=confidence,
-                        pattern_type="generated",
+                        pattern_type="fallback",
                         domain=domain,
                     )
                 )
@@ -561,7 +627,7 @@ class ContactFinder:
         prompt = f"""
         Company: "{company_name}"
         
-        Found domains from scraped emails:
+        Found domains from scraped emails (WARNING: may contain garbage data from data brokers, social media, etc.):
         {domains_list}
         
         Task: Filter and identify EMAIL CONTACT DOMAINS only.
@@ -569,7 +635,7 @@ class ContactFinder:
         KEEP ONLY domains that:
         - Are used for official business email communication by "{company_name}"
         - Belong to "{company_name}" or its subsidiaries/divisions
-        - Are likely to be used for employee email addresses
+        - Have evidence of being used for employee email addresses
         
         EXCLUDE domains that are:
         - Data brokers, lead generation tools, contact databases
@@ -578,13 +644,10 @@ class ContactFinder:
         - Marketing/sales tools and platforms
         - Directory services and listing sites
         
-        For valid email domains, also suggest likely subdomains that might be used for:
-        - Regional offices (us.domain.com, eu.domain.com, etc.)
-        - Departments (sales.domain.com, hr.domain.com, etc.)
-        - Mail services (mail.domain.com, email.domain.com, etc.)
+        Only suggest subdomains if you find actual evidence they are used for email communication.
         
-        Return JSON array of EMAIL CONTACT DOMAINS only:
-        ["company.com", "us.company.com", "subsidiary.com"]
+        Return JSON array of EMAIL CONTACT DOMAINS with evidence of email usage:
+        ["company.com", "subsidiary.com"]
         """
 
         result = self.llm.query(prompt)
@@ -629,10 +692,10 @@ if __name__ == "__main__":
     dotenv.load_dotenv()
 
     # Test configuration
-    company = "Daffodil International University"
-    employee = "Hojayfa Rahman"
+    company = "ABB"
+    employee = "Kevin Durocher"
 
-    print("🧪 LEAN CONTACT FINDER TEST")
+    print("🧪 CONTACT FINDER TEST")
     print("=" * 50)
 
     try:
