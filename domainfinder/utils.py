@@ -267,7 +267,9 @@ class WebScraper:
         try:
             response = requests.get(url, headers=self.headers, timeout=8)
             if response.status_code == 200:
-                soup = BeautifulSoup(response.content, "html.parser")
+                # Handle encoding properly
+                response.encoding = response.apparent_encoding or "utf-8"
+                soup = BeautifulSoup(response.text, "html.parser")
 
                 # Extract emails from page text
                 text_emails = self.extract_emails(soup.get_text())
@@ -358,6 +360,8 @@ class DomainValidator:
 
         # Count email occurrences per domain
         domain_counts = Counter()
+        subdomain_map = {}
+
         for email in emails:
             if "@" in email:
                 try:
@@ -365,6 +369,13 @@ class DomainValidator:
                     domain = clean_domain(domain)
                     if domain:
                         domain_counts[domain] += 1
+
+                        # Track subdomain patterns
+                        if domain.count(".") > 1:  # Has subdomain
+                            main_domain = ".".join(domain.split(".")[-2:])
+                            if main_domain not in subdomain_map:
+                                subdomain_map[main_domain] = set()
+                            subdomain_map[main_domain].add(domain)
                 except Exception:
                     continue
 
@@ -405,6 +416,9 @@ class DomainValidator:
             # Domain name relevance bonus
             confidence += 0.1  # Base relevance score
 
+            # Get subdomain list for this domain
+            sub_domains = list(subdomain_map.get(domain, []))
+
             results.append(
                 DomainResult(
                     domain=domain,
@@ -413,6 +427,7 @@ class DomainValidator:
                     confidence=round(min(1.0, confidence), 3),
                     from_llm=from_llm,
                     mx_valid=False,
+                    sub_mail_domains=sub_domains,
                 )
             )
 

@@ -43,6 +43,15 @@ class DomainFinder:
             scraped_data, company_info.likely_email_domains, {}
         )
 
+        # Merge company research subdomain data
+        for result in domain_analysis:
+            if result.domain in [
+                d.split(".")[-2] + "." + d.split(".")[-1]
+                for d in company_info.sub_mail_domains
+            ]:
+                result.sub_mail_domains.extend(company_info.sub_mail_domains)
+                result.sub_mail_domains = list(set(result.sub_mail_domains))
+
         # Filter for relevance with company research context
         domain_dicts = [d.model_dump() for d in domain_analysis]
         filtered_dicts = filter_relevant_domains(

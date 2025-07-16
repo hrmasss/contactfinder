@@ -7,6 +7,7 @@ class CompanyInfo(BaseModel):
     website: str = ""
     likely_email_domains: List[str] = Field(default_factory=list)
     description: str = ""
+    sub_mail_domains: List[str] = Field(default_factory=list)
 
     @field_validator("likely_email_domains")
     @classmethod
@@ -21,6 +22,7 @@ class DomainResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     from_llm: bool = False
     mx_valid: bool = False
+    sub_mail_domains: List[str] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):

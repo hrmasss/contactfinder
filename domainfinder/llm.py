@@ -22,8 +22,11 @@ def research_company(
         "company_name": "Short searchable name",
         "website": "primary-domain.com", 
         "likely_email_domains": ["primary.com", "alternative.com"],
-        "description": "Brief description"
+        "description": "Brief description",
+        "sub_mail_domains": ["us.domain.com", "ca.domain.com"]
     }}
+    
+    IMPORTANT: Only include sub_mail_domains if you find evidence that the company uses regional/departmental subdomains for email addresses (like us.company.com, ca.company.com). Leave empty if no such pattern exists.
     
     Return ONLY the JSON object, no other text.
     """

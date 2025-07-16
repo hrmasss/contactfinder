@@ -13,6 +13,7 @@ def research_employee_emails(
     llm_manager: LLMManager,
     employee_context: Dict[str, Any] = None,
     scraped_emails: List[str] = None,
+    domain_subdomains: Dict[str, List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Research employee emails using LLM with company and employee context"""
 
@@ -40,6 +41,9 @@ def research_employee_emails(
     )
     for i, domain in enumerate(domains[:3], 1):
         domains_section += f"{i}. {domain}\n"
+        subdomains = domain_subdomains.get(domain, []) if domain_subdomains else []
+        if subdomains:
+            domains_section += f"   Subdomains: {', '.join(subdomains)}\n"
     domains_section += "\nNote: These domains were found through automated analysis. Verify relevance and conduct additional research if needed."
 
     prompt = f"""
@@ -50,6 +54,11 @@ Employee: "{employee_name}"
 {scraped_section}
 
 TASK: Find the most likely email addresses for this employee.
+
+SUBDOMAIN USAGE:
+- If subdomains are listed for a domain, prioritize using the appropriate subdomain based on employee context
+- Match employee location/department to relevant subdomain (e.g., us.company.com for US employees)
+- If no employee context matches, use the most common subdomain or main domain
 
 PRIORITY RULES (in order):
 1. PUBLICLY AVAILABLE EMAILS: If you find publicly available emails for this exact person at this company, return them with HIGH confidence (0.8-1.0)
@@ -67,41 +76,95 @@ RESPONSE FORMAT:
 Return a JSON array of email objects, sorted by confidence (highest first):
 [
   {{
-    "email": "john.doe@company.com",
+    "email": "john.doe@us.company.com",
     "confidence": 0.85,
     "pattern_type": "public",
     "source": "company directory",
-    "domain": "company.com",
+    "domain": "us.company.com",
     "pattern_frequency": 1
   }}
 ]
 
 LIMITS:
+- MUST return at least 1 email (use fallback patterns if needed)
 - Return 1 email if absolutely certain (publicly found)
 - Return 2-5 emails if based on company patterns
 - Return up to 15 emails if using common patterns
-- Minimum 1 email, maximum 15 emails
+- Maximum 15 emails
 
-Focus on QUALITY over quantity. Better to return fewer, more likely emails than many uncertain ones.
+FALLBACK PATTERNS (use if no better data available):
+- firstname.lastname@domain.com
+- firstname@domain.com
+- lastname@domain.com
+- f.lastname@domain.com
+- firstnamelastname@domain.com
+
+Focus on QUALITY over quantity. Better to return fewer, more likely emails than many uncertain ones. NEVER return empty results.
 """
 
     response = llm_manager.query(prompt)
 
     if not response.success:
-        return []
+        # Fallback: generate basic patterns when LLM fails
+        return generate_fallback_emails(employee_name, domains[:1])
 
     try:
         data = response.data
         if isinstance(data, list):
-            return data
+            result = data
         elif isinstance(data, dict):
             # Look for email arrays in the response
+            result = []
             for key, value in data.items():
                 if isinstance(value, list) and value:
-                    return value
-        return []
+                    result = value
+                    break
+        else:
+            result = []
+
+        # Ensure we have at least one result
+        if not result:
+            result = generate_fallback_emails(employee_name, domains[:1])
+
+        return result
     except Exception:
+        return generate_fallback_emails(employee_name, domains[:1])
+
+
+def generate_fallback_emails(
+    employee_name: str, domains: List[str]
+) -> List[Dict[str, Any]]:
+    """Generate fallback email patterns when LLM fails"""
+    if not domains:
         return []
+
+    domain = domains[0]
+    name_parts = employee_name.lower().split()
+
+    if len(name_parts) < 2:
+        return []
+
+    first, last = name_parts[0], name_parts[-1]
+
+    patterns = [
+        f"{first}.{last}@{domain}",
+        f"{first}@{domain}",
+        f"{last}@{domain}",
+        f"{first[0]}{last}@{domain}",
+        f"{first}{last[0]}@{domain}",
+    ]
+
+    return [
+        {
+            "email": pattern,
+            "confidence": 0.3,
+            "pattern_type": "fallback",
+            "source": "system_generated",
+            "domain": domain,
+            "pattern_frequency": 1,
+        }
+        for pattern in patterns
+    ]
 
 
 def scrape_employee_emails(
@@ -149,6 +212,8 @@ def scrape_employee_emails(
             )
 
             if response.status_code == 200:
+                # Handle encoding properly
+                response.encoding = response.apparent_encoding or "utf-8"
                 data = response.json()
                 results = data.get("organic", [])
 

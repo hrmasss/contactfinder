@@ -21,12 +21,12 @@ def main():
     # Default: gemini -> gpt
     # provider_order = ["gemini", "gpt"]
     # Custom: gpt -> gemini
-    provider_order = ["gpt", "gemini"]
+    provider_order = ["gemini"]
 
     # Test data
-    company = "Open AI"
+    company = "ABB"
     company_context = {}
-    employee = "Sam Altman"
+    employee = "Kevin Durocher"
     employee_context = {}
 
     # Initialize domain finder
@@ -58,8 +58,13 @@ def main():
         print("-" * 50)
 
         for i, domain in enumerate(results, 1):
+            subdomain_info = (
+                f" (subdomains: {', '.join(domain.sub_mail_domains)})"
+                if domain.sub_mail_domains
+                else ""
+            )
             print(
-                f"{i:2d}. {domain.domain:<25} ({domain.confidence:.3f}) - {domain.email_count} emails"
+                f"{i:2d}. {domain.domain:<25} ({domain.confidence:.3f}) - {domain.email_count} emails{subdomain_info}"
             )
 
         if results:
@@ -72,7 +77,10 @@ def main():
         stop_spinner.set()
         spinner_thread.join()
         print("\r" + " " * 20 + "\r", end="")
-        print(f"❌ Error: {e}")
+        print(f"❌ Domain finder error: {e}")
+        import traceback
+
+        traceback.print_exc()
 
     # Test email finder
     print("\n\n📧 EMAIL FINDER TEST")
@@ -123,7 +131,10 @@ def main():
         stop_spinner.set()
         spinner_thread.join()
         print("\r" + " " * 20 + "\r", end="")
-        print(f"❌ Error: {e}")
+        print(f"❌ Email finder error: {e}")
+        import traceback
+
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

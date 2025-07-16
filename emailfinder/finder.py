@@ -65,8 +65,11 @@ class EmailFinder:
         if not domain_results:
             return []
 
-        # Get top 3 domains
+        # Get top 3 domains and their subdomains
         top_domains = [result.domain for result in domain_results[:3]]
+        domain_subdomains = {
+            result.domain: result.sub_mail_domains for result in domain_results[:3]
+        }
 
         # Step 2: Scrape for employee emails
         scraped_emails = scrape_employee_emails(
@@ -85,6 +88,7 @@ class EmailFinder:
             self.llm_manager,
             employee_context,
             scraped_emails,
+            domain_subdomains,
         )
 
         if not email_data:
