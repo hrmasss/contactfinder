@@ -66,7 +66,7 @@ def clean_domain(domain: str) -> str:
 
 
 def clean_email(email: str) -> str:
-    """Clean and validate email address"""
+    """Clean and validate email address - less strict for generated emails"""
     if not email:
         return ""
 
@@ -78,10 +78,32 @@ def clean_email(email: str) -> str:
 
     try:
         local, domain = email.split("@")
-        domain = clean_domain(domain)
 
-        # Clean local part
+        # Clean local part - allow more characters for generated emails
         local = re.sub(r"[^\w\.\-\+]", "", local)
+
+        # For domain validation, be less strict for generated emails
+        # Just do basic cleaning
+        domain = domain.strip().lower()
+
+        # Remove protocol prefixes
+        if domain.startswith(("http://", "https://")):
+            domain = domain.split("://", 1)[1]
+
+        # Remove www prefix
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        # Remove path, query, and fragment
+        domain = domain.split("/")[0].split("?")[0].split("#")[0]
+
+        # Basic domain validation - much more lenient
+        if not domain or "." not in domain or len(domain) < 3:
+            return ""
+
+        # Check for obviously invalid domains
+        if domain.startswith(".") or domain.endswith(".") or ".." in domain:
+            return ""
 
         if not local or not domain:
             return ""
@@ -133,7 +155,9 @@ class EmailResult(BaseModel):
     pattern_type: str = ""  # "public", "pattern", "guess"
     source: str = ""
     domain: str = ""
-    pattern_frequency: int = 0  # How often this pattern appears
+    pattern_frequency: float = (
+        0.0  # How often this pattern appears (as percentage, e.g., 0.85 = 85%)
+    )
 
     @field_validator("email")
     @classmethod
@@ -638,43 +662,27 @@ class DomainValidator:
     ) -> List[Dict]:
         """Get LLM analysis of domain patterns and subdomains"""
         prompt = f"""
-Analyze these email addresses and domain suggestions to identify the main company domains and their subdomains.
+Analyze email addresses and identify company domains with subdomains.
 
-EMAIL ADDRESSES FOUND:
-{chr(10).join(emails[:50])}  # Limit to first 50 for token efficiency
+EMAIL ADDRESSES:
+{chr(10).join(emails[:30])}
 
-SUGGESTED DOMAINS FROM COMPANY RESEARCH:
+SUGGESTED DOMAINS:
 {chr(10).join(suggested_domains)}
 
-INSTRUCTIONS:
-1. Group email domains by their main company domain (e.g., us.abb.com, ca.abb.com → main domain: abb.com)
-2. Clean up malformed domains (remove test emails, invalid domains, etc.)
-3. Identify relevant subdomains for each main domain
-4. Calculate confidence scores based on:
-   - Email frequency for this domain
-   - Relevance to company (avoid generic domains like gmail.com)
-   - Subdomain patterns indicating corporate structure
-5. Only include domains that appear legitimate and company-related
+Group domains by main company domain (e.g., us.company.com → company.com).
+Calculate confidence based on email frequency and company relevance.
+Exclude generic providers (gmail, outlook, etc.).
 
-Return a JSON array of domain objects:
-```json
+Return JSON array of top 5 domains:
 [
   {{
-    "domain": "abb.com",
-    "confidence": 0.95,
-    "sub_mail_domains": ["us.abb.com", "ca.abb.com", "ch.abb.com"],
-    "reasoning": "Main corporate domain with regional subdomains"
-  }},
-  {{
-    "domain": "example.com", 
-    "confidence": 0.3,
-    "sub_mail_domains": [],
-    "reasoning": "Secondary domain with few emails"
+    "domain": "company.com",
+    "confidence": 0.9,
+    "sub_mail_domains": ["us.company.com", "ca.company.com"],
+    "reasoning": "Main domain with regional subdomains"
   }}
 ]
-```
-
-Focus on finding the TOP 5 most relevant domains. Exclude generic email providers (gmail, outlook, etc.).
 """
 
         response = llm_manager.query(prompt)
@@ -716,18 +724,21 @@ Focus on finding the TOP 5 most relevant domains. Exclude generic email provider
                 except Exception:
                     continue
 
-        # Add suggested domains
+        # Add suggested domains (these are from company research, so prioritize them)
         for domain in suggested_domains:
             domain = clean_domain(domain)
             if domain:
-                domain_counts[domain] = domain_counts.get(domain, 0)
+                # Give suggested domains higher base count
+                domain_counts[domain] = domain_counts.get(domain, 0) + 5
                 if domain not in subdomain_map:
                     subdomain_map[domain] = set()
 
         # Build results
         results = []
         for domain, email_count in domain_counts.items():
-            confidence = min(1.0, 0.3 + (email_count * 0.01))
+            # Higher confidence for suggested domains
+            base_confidence = 0.6 if domain in suggested_domains else 0.3
+            confidence = min(1.0, base_confidence + (email_count * 0.01))
             sub_domains = list(subdomain_map.get(domain, set()))
 
             results.append(
@@ -760,28 +771,21 @@ def research_company(
                 context_section += f"- {key.title()}: {value}\n"
 
     prompt = f"""
-    Research "{company_query}" and provide ONLY the JSON response below.
-    {context_section}
-    For "{company_query}", return exactly this JSON format:
-    {{
-        "company_name": "Short searchable name",
-        "website": "primary-domain.com", 
-        "likely_email_domains": ["primary.com", "alternative.com"],
-        "description": "Brief description",
-        "sub_mail_domains": ["us.domain.com", "ca.domain.com"]
-    }}
-    
-    IMPORTANT: Only include sub_mail_domains if you find evidence that the company uses regional/departmental subdomains for email addresses. 
-    
-    Research the company's email structure to identify if they use patterns like:
-    - Regional subdomains (us.company.com, ca.company.com, uk.company.com)
-    - Country-specific subdomains (in.company.com, de.company.com, fr.company.com)
-    - Departmental subdomains (hr.company.com, sales.company.com)
-    
-    Leave empty if no such pattern exists.
-    
-    Return ONLY the JSON object, no other text.
-    """
+Research "{company_query}" and return company information.
+{context_section}
+
+Return JSON format:
+{{
+    "company_name": "Company Name",
+    "website": "company.com", 
+    "likely_email_domains": ["company.com", "subsidiary.com"],
+    "description": "Brief description",
+    "sub_mail_domains": ["us.company.com", "ca.company.com"]
+}}
+
+Only include sub_mail_domains if the company uses regional/departmental email subdomains.
+Return ONLY the JSON object.
+"""
 
     response = llm_manager.query(prompt)
 
@@ -844,66 +848,38 @@ def research_employee_emails(
             domains_section += f"   Subdomains: {', '.join(subdomains)}\n"
 
     prompt = f"""
-Company: "{company_name}"
-Employee: "{employee_name}"
+Company: {company_name}
+Employee: {employee_name}
 {context_section}
 {domains_section}
 {scraped_section}
 
-TASK: Find the most likely email addresses for this employee.
+Generate likely email addresses for this employee at this company.
 
-SUBDOMAIN USAGE:
-- If subdomains are listed for a domain, prioritize using the appropriate subdomain based on employee context
-- Match employee location/department to relevant subdomain (e.g., us.company.com for US employees)
-- If no employee context matches, use the most common subdomain or main domain
+If you find existing public emails with high confidence, return 1-3 emails.
+Otherwise, generate 10-15 emails using common business patterns.
 
-PRIORITY RULES (in order):
-1. PUBLICLY AVAILABLE EMAILS: If you find publicly available emails for this exact person at this company, return them with HIGH confidence (0.8-1.0)
-2. COMPANY EMAIL PATTERNS: Research the company's email patterns using the provided domains, then generate emails based on discovered patterns with MEDIUM confidence (0.5-0.8)
-3. COMMON PATTERNS: If insufficient data, use standard business email patterns with LOW confidence (0.2-0.5)
-
-FILTERING RULES:
-- REMOVE: Personal emails (gmail, yahoo, hotmail, etc.)
-- REMOVE: Generic/role emails (info@, contact@, support@, etc.)
-- REMOVE: Irrelevant domains not related to the company
-- REMOVE: Clearly outdated or spam emails from scraped data
-- KEEP: Only emails that could realistically belong to this specific employee
-
-RESPONSE FORMAT:
-Return a JSON array of email objects, sorted by confidence (highest first):
+Return JSON array:
 [
   {{
-    "email": "john.doe@us.company.com",
-    "confidence": 0.85,
-    "pattern_type": "public",
-    "source": "company directory",
-    "domain": "us.company.com",
-    "pattern_frequency": 1
+    "email": "john.doe@company.com",
+    "confidence": 0.7,
+    "pattern_type": "pattern",
+    "source": "generated",
+    "domain": "company.com",
+    "pattern_frequency": 0.5
   }}
 ]
 
-LIMITS:
-- MUST return at least 1 email (use fallback patterns if needed)
-- Return 1 email if absolutely certain (publicly found)
-- Return 2-5 emails if based on company patterns
-- Return up to 15 emails if using common patterns
-- Maximum 15 emails
-
-FALLBACK PATTERNS (use if no better data available):
-- firstname.lastname@domain.com
-- firstname@domain.com
-- lastname@domain.com
-- f.lastname@domain.com
-- firstnamelastname@domain.com
-
-Focus on QUALITY over quantity. Better to return fewer, more likely emails than many uncertain ones. NEVER return empty results.
+Use patterns: firstname.lastname, firstname, lastname, f.lastname, firstnamelastname
+Apply to all domains and subdomains provided.
 """
 
     response = llm_manager.query(prompt)
 
     if not response.success:
-        # Fallback: generate basic patterns when LLM fails
-        return generate_fallback_emails(employee_name, domains[:1])
+        # Fallback: generate comprehensive patterns when LLM fails
+        return generate_fallback_emails(employee_name, domains)
 
     try:
         data = response.data
@@ -926,49 +902,114 @@ Focus on QUALITY over quantity. Better to return fewer, more likely emails than 
         else:
             result = []
 
-        # Ensure we have at least one result
-        if not result:
-            result = generate_fallback_emails(employee_name, domains[:1])
+        # Analyze the results to determine if we found public emails
+        has_public_emails = any(
+            email.get("pattern_type") == "public" and email.get("confidence", 0) > 0.7
+            for email in result
+        )
 
-        return result
+        # If we have high-confidence public emails, return top 3
+        if has_public_emails:
+            public_emails = [
+                email
+                for email in result
+                if email.get("pattern_type") == "public"
+                and email.get("confidence", 0) > 0.7
+            ]
+            return public_emails[:3]
+
+        # If we have some results but not enough, supplement with patterns
+        if result and len(result) < 10:
+            # Keep existing results and add fallback patterns
+            fallback_emails = generate_fallback_emails(employee_name, domains)
+
+            # Combine results, avoiding duplicates
+            existing_emails = {email.get("email", "") for email in result}
+            for fallback in fallback_emails:
+                if fallback["email"] not in existing_emails:
+                    result.append(fallback)
+
+            return result
+
+        # If we have sufficient results, return them
+        if result and len(result) >= 10:
+            return result
+
+        # If we have no results or very few, generate comprehensive fallback
+        return generate_fallback_emails(employee_name, domains)
+
     except Exception:
-        return generate_fallback_emails(employee_name, domains[:1])
+        return generate_fallback_emails(employee_name, domains)
 
 
 def generate_fallback_emails(
     employee_name: str, domains: List[str]
 ) -> List[Dict[str, Any]]:
-    """Generate fallback email patterns when LLM fails"""
+    """Generate comprehensive fallback email patterns when LLM fails"""
     if not domains:
         domains = ["example.com"]
 
-    domain = domains[0]
     name_parts = employee_name.lower().split()
-
     if len(name_parts) < 2:
         return []
 
     first, last = name_parts[0], name_parts[-1]
 
-    patterns = [
-        f"{first}.{last}@{domain}",
-        f"{first}@{domain}",
-        f"{last}@{domain}",
-        f"{first[0]}{last}@{domain}",
-        f"{first}{last[0]}@{domain}",
+    # Comprehensive pattern set for each domain
+    pattern_templates = [
+        # Common corporate patterns
+        "{first}.{last}@{domain}",
+        "{first}@{domain}",
+        "{last}@{domain}",
+        "{first}{last}@{domain}",
+        # Initial patterns
+        "{first_initial}.{last}@{domain}",
+        "{first}.{last_initial}@{domain}",
+        "{first_initial}{last}@{domain}",
+        "{first}{last_initial}@{domain}",
+        # Underscore patterns
+        "{first}_{last}@{domain}",
+        "{first_initial}_{last}@{domain}",
+        # Hyphen patterns
+        "{first}-{last}@{domain}",
+        "{first_initial}-{last}@{domain}",
+        # Number patterns (common in larger companies)
+        "{first}.{last}1@{domain}",
+        "{first}{last}1@{domain}",
+        "{first}1@{domain}",
     ]
 
-    result = [
-        {
-            "email": pattern,
-            "confidence": 0.3,
-            "pattern_type": "fallback",
-            "source": "system_generated",
-            "domain": domain,
-            "pattern_frequency": 1,
-        }
-        for pattern in patterns
-    ]
+    result = []
+
+    # Generate patterns for each domain (including subdomains)
+    for domain in domains:
+        for i, template in enumerate(pattern_templates):
+            email = template.format(
+                first=first,
+                last=last,
+                first_initial=first[0],
+                last_initial=last[0],
+                domain=domain,
+            )
+
+            # Vary confidence based on pattern popularity
+            if i < 4:  # Most common patterns
+                confidence = 0.4
+            elif i < 8:  # Moderately common patterns
+                confidence = 0.35
+            else:  # Less common patterns
+                confidence = 0.3
+
+            result.append(
+                {
+                    "email": email,
+                    "confidence": confidence,
+                    "pattern_type": "fallback",
+                    "source": "system_generated",
+                    "domain": domain,
+                    "pattern_frequency": confidence,  # Use confidence as frequency
+                }
+            )
 
     return result
 
@@ -987,51 +1028,30 @@ def filter_relevant_domains(
         [f"- {d['domain']}: {d['email_count']} emails" for d in domains[:15]]
     )
 
-    # Include company research context
     research_context = ""
     if company_info:
         research_context = f"""
-Company Research Context:
-- Official Company: {company_info.company_name}
-- Known Website: {company_info.website}
-- Expected Domains: {", ".join(company_info.likely_email_domains)}
-- Description: {company_info.description}
+Company: {company_info.company_name}
+Website: {company_info.website}
+Expected domains: {", ".join(company_info.likely_email_domains)}
 """
 
     prompt = f"""
-    Company: "{company_name}"
-    {research_context}
-    
-    Raw domains found (may contain malformed domains):
-    {domain_list}
-    
-    Tasks:
-    1. Clean up malformed domains (e.g., "example.comasdfsadf" → "example.com")
-    2. Keep only domains DIRECTLY related to "{company_name}"
-    3. Use the company research context to make informed decisions
-    
-    STRICTLY REMOVE:
-    - Generic domains (gmail, yahoo, hotmail, outlook)
-    - Lead generation/scraping services (leadiq, zoominfo, apollo, rocketreach, hunter, clearbit, prospectstack, etc.)
-    - Business directory sites (yellowpages, yelp, linkedin, crunchbase, etc.)
-    - Social media platforms (facebook, twitter, instagram, etc.)
-    - Unrelated companies with different business focus
-    - Personal domains (individual names not matching company)
-    - Job boards and recruiting sites
-    - Marketing/advertising platforms
-    - Any domain that provides leads/contact info about companies rather than being the company itself
-    
-    KEEP AND CLEAN:
-    - Primary company domains (clean up if malformed)
-    - Official website domain and its variations
-    - Subsidiary domains (clearly related to main company)
-    - Department/division domains (hr.company.com, sales.company.com)
-    - Regional domains (compound TLDs like .co.uk, .edu.bd)
-    - Domains that ARE the company, not domains that talk ABOUT the company
-    
-    Return ONLY a JSON array of cleaned, relevant domain names:
-    ["cleaneddomain1.com", "cleaneddomain2.co.uk"]
-    """
+{research_context}
+
+Found domains with email counts:
+{domain_list}
+
+Task: Return only domains that belong to "{company_name}" or its subsidiaries.
+
+Rules:
+- Include: Company domains, subsidiaries, regional offices
+- Exclude: Email providers, social media, directories, lead generation services
+- Clean malformed domains (fix typos, remove extra characters)
+
+Return JSON array of cleaned domain names:
+["domain1.com", "domain2.co.uk"]
+"""
 
     response = llm_manager.query(prompt)
 
@@ -1050,10 +1070,9 @@ Company Research Context:
             else:
                 return domains
 
-        # Consolidate cleaned domains and merge their data
+        # Consolidate cleaned domains
         domain_map = {}
         for original_domain in domains:
-            # Find if this domain has a cleaned version
             cleaned_version = None
             for clean_domain in relevant_domains:
                 if clean_domain.replace(".", "").replace("-", "") in original_domain[
@@ -1073,7 +1092,7 @@ Company Research Context:
                         "mx_valid": False,
                     }
 
-                # Merge data from all versions of this domain
+                # Merge data
                 domain_map[cleaned_version]["email_count"] += original_domain[
                     "email_count"
                 ]
@@ -1089,30 +1108,42 @@ Company Research Context:
                     or original_domain["mx_valid"]
                 )
 
-        # Recalculate confidence scores after consolidation
+        # If no domains matched, keep domains that contain company name
+        if not domain_map:
+            company_words = company_name.lower().split()
+            for original_domain in domains:
+                domain_lower = original_domain["domain"].lower()
+                if any(word in domain_lower for word in company_words if len(word) > 2):
+                    domain_map[original_domain["domain"]] = original_domain
+
+        # Calculate confidence scores
         for domain_data in domain_map.values():
             confidence = 0.0
+
+            # Company research bonus
             if domain_data["from_llm"]:
-                confidence += 0.3  # LLM suggestions (company research)
+                confidence += 0.5
 
-            # Higher weight for email count
+            # Company name match bonus
+            domain_lower = domain_data["domain"].lower()
+            company_words = [word.lower() for word in company_name.split()]
+
+            for word in company_words:
+                if len(word) > 2 and word in domain_lower:
+                    confidence += 0.4
+                    break
+
+            # Email count bonus
             if domain_data["email_count"] > 0:
-                confidence += min(0.5, domain_data["email_count"] * 0.015)
-
-                # Bonus for domains with many emails
+                confidence += min(0.3, domain_data["email_count"] * 0.01)
                 if domain_data["email_count"] >= 10:
                     confidence += 0.1
                 elif domain_data["email_count"] >= 5:
                     confidence += 0.05
 
+            # Source count bonus
             if domain_data["source_count"] > 0:
-                confidence += min(0.2, domain_data["source_count"] * 0.02)
-
-            # Bonus for likely official domains
-            if any(
-                word in domain_data["domain"] for word in company_name.lower().split()
-            ):
-                confidence += 0.2
+                confidence += min(0.1, domain_data["source_count"] * 0.01)
 
             domain_data["confidence"] = round(min(1.0, confidence), 3)
 
@@ -1192,7 +1223,7 @@ class ContactFinder:
         employee_name: Optional[str] = None,
         company_context: Dict[str, Any] = None,
         employee_context: Dict[str, Any] = None,
-        max_results: int = 5,
+        max_results: int = 25,  # Increased default to ensure we get sufficient results
     ) -> ContactFinderResult:
         """
         Find contact information for a company and optionally an employee.
@@ -1312,7 +1343,10 @@ class ContactFinder:
 
                     likely_emails.append(result)
 
-                except Exception:
+                except Exception as e:
+                    # Only log in debug mode
+                    if os.getenv("DEBUG"):
+                        print(f"DEBUG: Exception processing email {email_dict}: {e}")
                     continue
 
             # Sort by confidence and remove duplicates
@@ -1325,6 +1359,28 @@ class ContactFinder:
                     unique_emails.append(result)
 
             likely_emails = unique_emails[:max_results]
+
+            # SAFETY CHECK: Never return 0 emails for employee search
+            if employee_name and len(likely_emails) == 0:
+                print(
+                    "WARNING: No emails passed validation, generating emergency fallback"
+                )
+                # Generate simple fallback without validation
+                name_parts = employee_name.lower().split()
+                if len(name_parts) >= 2:
+                    first, last = name_parts[0], name_parts[-1]
+                    emergency_domain = top_domains[0] if top_domains else "example.com"
+                    emergency_email = f"{first}.{last}@{emergency_domain}"
+
+                    emergency_result = EmailResult(
+                        email=emergency_email,
+                        confidence=0.2,
+                        pattern_type="emergency_fallback",
+                        source="system_emergency",
+                        domain=emergency_domain,
+                        pattern_frequency=0.1,  # 10% frequency for emergency fallback
+                    )
+                    likely_emails = [emergency_result]
 
             # Generate employee description
             if employee_context:
@@ -1417,7 +1473,7 @@ def test_company_only(company: str, company_context: Dict[str, Any] = None):
     print("=" * 50)
 
     try:
-        finder = ContactFinder()
+        finder = ContactFinder(provider_order=["gpt"])
         result = finder.find_contacts(
             company_name=company,
             company_context=company_context,
@@ -1459,7 +1515,7 @@ def test_company_with_employee(
     print("=" * 50)
 
     try:
-        finder = ContactFinder()
+        finder = ContactFinder(provider_order=["gpt"])
         result = finder.find_contacts(
             company_name=company,
             employee_name=employee,
@@ -1546,11 +1602,11 @@ if __name__ == "__main__":
             )
             stop_spinner.set()
             spinner_thread.join()
-            print(f"\r✅ Test 2 completed in {time.time() - start_time:.2f}s\n")
+            print(f"\r✅ Test completed in {time.time() - start_time:.2f}s\n")
         except Exception as e:
             stop_spinner.set()
             spinner_thread.join()
-            print(f"\r❌ Test 2 failed: {e}\n")
+            print(f"\r❌ Test failed: {e}\n")
         print("🎉 All tests completed!")
     elif company:
         print("\n⚡ Starting Test: Company-only search...")
