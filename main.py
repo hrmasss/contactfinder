@@ -1,7 +1,6 @@
 import time
 import dotenv
 import threading
-from domainfinder import DomainFinder
 from emailfinder import EmailFinder
 
 
@@ -29,66 +28,13 @@ def main():
     employee = "Kevin Durocher"
     employee_context = {}
 
-    # Initialize domain finder
-    domain_finder = DomainFinder(provider_order=provider_order)
-
-    # Test domain finder
-    print("🔍 DOMAIN FINDER TEST")
-    print("=" * 50)
-
-    # Start spinner
-    stop_spinner = threading.Event()
-    spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
-    spinner_thread.start()
-
-    try:
-        start_time = time.time()
-        results = domain_finder.find_domains(company, context=company_context)
-        stop_spinner.set()
-        spinner_thread.join()
-
-        # Clear spinner
-        print("\r" + " " * 20 + "\r", end="")
-
-        end_time = time.time()
-        duration = end_time - start_time
-
-        print(f"✅ Analysis complete in {duration:.2f}s")
-        print(f"📊 Found {len(results)} ranked domains:")
-        print("-" * 50)
-
-        for i, domain in enumerate(results, 1):
-            subdomain_info = (
-                f" (subdomains: {', '.join(domain.sub_mail_domains)})"
-                if domain.sub_mail_domains
-                else ""
-            )
-            print(
-                f"{i:2d}. {domain.domain:<25} ({domain.confidence:.3f}) - {domain.email_count} emails{subdomain_info}"
-            )
-
-        if results:
-            print(f"\n� Best domain: {results[0].domain}")
-        else:
-            print("\n⚠️ No domains found")
-
-    except Exception as e:
-        # Stop spinner on error
-        stop_spinner.set()
-        spinner_thread.join()
-        print("\r" + " " * 20 + "\r", end="")
-        print(f"❌ Domain finder error: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-    # Test email finder
-    print("\n\n📧 EMAIL FINDER TEST")
-    print("=" * 50)
-
-    # Initialize email finder
+    # Initialize email finder (it includes domain finding)
     email_finder = EmailFinder(provider_order=provider_order)
 
+    # Test combined email + domain finder
+    print("🔍 EMAIL + DOMAIN FINDER TEST")
+    print("=" * 50)
+
     # Start spinner
     stop_spinner = threading.Event()
     spinner_thread = threading.Thread(target=loading_spinner, args=(stop_spinner,))
@@ -96,7 +42,7 @@ def main():
 
     try:
         start_time = time.time()
-        email_results = email_finder.find_emails(
+        result = email_finder.find_emails_with_domains(
             employee_name=employee,
             company_name=company,
             company_context=company_context,
@@ -112,8 +58,31 @@ def main():
         end_time = time.time()
         duration = end_time - start_time
 
+        # Show domain results
+        domains = result["domains"]
+        email_results = result["emails"]
+
         print(f"✅ Analysis complete in {duration:.2f}s")
-        print(f"� Found {len(email_results)} potential emails:")
+        print(f"📊 Found {len(domains)} ranked domains:")
+        print("-" * 50)
+
+        for i, domain in enumerate(domains, 1):
+            subdomain_info = (
+                f" (subdomains: {', '.join(domain.sub_mail_domains)})"
+                if domain.sub_mail_domains
+                else ""
+            )
+            print(
+                f"{i:2d}. {domain.domain:<25} ({domain.confidence:.3f}) - {domain.email_count} emails{subdomain_info}"
+            )
+
+        if domains:
+            print(f"\n� Best domain: {domains[0].domain}")
+        else:
+            print("\n⚠️ No domains found")
+
+        # Show email results
+        print(f"\n📧 Found {len(email_results)} potential emails:")
         print("-" * 50)
 
         for i, email in enumerate(email_results, 1):

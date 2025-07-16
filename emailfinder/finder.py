@@ -6,6 +6,7 @@ from .llm import (
     research_employee_emails,
     scrape_employee_emails,
     filter_and_rank_emails,
+    generate_fallback_emails,
 )
 
 
@@ -34,27 +35,18 @@ class EmailFinder:
         self.llm_manager = LLMManager(provider_order)
         self.domain_finder = DomainFinder(self.serper_api_key, provider_order)
 
-    def find_emails(
+    def find_emails_with_domains(
         self,
         employee_name: str,
         company_name: str,
         company_context: Dict[str, Any] = None,
         employee_context: Dict[str, Any] = None,
         max_results: int = 5,
-    ) -> List[EmailResult]:
-        """Find and rank email addresses for an employee
-
-        Args:
-            employee_name: Name of the employee
-            company_name: Name of the company
-            company_context: Additional context for company identification
-                           e.g., {"industry": "Technology", "location": "New York", "website": "..."}
-            employee_context: Additional context for employee identification
-                            e.g., {"title": "CEO", "department": "Engineering", "linkedin": "..."}
-            max_results: Maximum number of email results to return (1-15)
+    ) -> Dict[str, Any]:
+        """Find emails and return with domain info
 
         Returns:
-            List of EmailResult objects sorted by confidence
+            Dict with 'emails' and 'domains' keys
         """
 
         # Step 1: Get top 3 domains using domain finder
@@ -63,7 +55,12 @@ class EmailFinder:
         )
 
         if not domain_results:
-            return []
+            # Generate fallback emails even without domain discovery
+            fallback_emails = generate_fallback_emails(
+                employee_name, [f"{company_name.lower().replace(' ', '')}.com"]
+            )
+            email_results = filter_and_rank_emails(fallback_emails, [])
+            return {"domains": [], "emails": email_results[:max_results]}
 
         # Get top 3 domains and their subdomains
         top_domains = [result.domain for result in domain_results[:3]]
@@ -91,16 +88,45 @@ class EmailFinder:
             domain_subdomains,
         )
 
+        # Step 4: Ensure we always have results
         if not email_data:
-            return []
+            email_data = generate_fallback_emails(employee_name, top_domains)
 
-        # Step 4: Filter and rank results
+        # Step 5: Filter and rank results
         results = filter_and_rank_emails(email_data, top_domains)
 
         # Limit results based on max_results
         final_results = results[:max_results]
 
-        return final_results
+        return {"domains": domain_results, "emails": final_results}
+
+    def find_emails(
+        self,
+        employee_name: str,
+        company_name: str,
+        company_context: Dict[str, Any] = None,
+        employee_context: Dict[str, Any] = None,
+        max_results: int = 5,
+    ) -> List[EmailResult]:
+        """Find and rank email addresses for an employee
+
+        Args:
+            employee_name: Name of the employee
+            company_name: Name of the company
+            company_context: Additional context for company identification
+                           e.g., {"industry": "Technology", "location": "New York", "website": "..."}
+            employee_context: Additional context for employee identification
+                            e.g., {"title": "CEO", "department": "Engineering", "linkedin": "..."}
+            max_results: Maximum number of email results to return (1-15)
+
+        Returns:
+            List of EmailResult objects sorted by confidence
+        """
+
+        result = self.find_emails_with_domains(
+            employee_name, company_name, company_context, employee_context, max_results
+        )
+        return result["emails"]
 
     def find_emails_simple(
         self,

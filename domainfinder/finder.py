@@ -43,10 +43,6 @@ class DomainFinder:
             scraped_data, company_info.likely_email_domains, {}
         )
 
-        # Debug output
-        print(f"DEBUG: Company research found sub_mail_domains: {company_info.sub_mail_domains}")
-        print(f"DEBUG: Domain analysis results: {[(r.domain, r.sub_mail_domains) for r in domain_analysis]}")
-
         # Filter for relevance with company research context
         domain_dicts = [d.model_dump() for d in domain_analysis]
         filtered_dicts = filter_relevant_domains(

@@ -357,15 +357,12 @@ class DomainValidator:
         """Analyze and rank domains using LLM for complex subdomain analysis"""
         emails = scraped_data["emails"]
         domain_sources = scraped_data["domain_sources"]
-        
-        print(f"DEBUG: analyze_domains called with {len(emails)} emails")
-        print(f"DEBUG: LLM domains: {llm_domains}")
 
         # Use LLM to analyze domain patterns and subdomains
         llm_manager = LLMManager()
-        domain_analysis = self._get_llm_domain_analysis(llm_manager, emails, llm_domains)
-        
-        print(f"DEBUG: LLM domain analysis: {domain_analysis}")
+        domain_analysis = self._get_llm_domain_analysis(
+            llm_manager, emails, llm_domains
+        )
 
         # Build results from LLM analysis
         results = []
@@ -373,22 +370,22 @@ class DomainValidator:
             domain = domain_info.get("domain", "")
             if not domain:
                 continue
-                
+
             # Get email count for this domain
             email_count = sum(1 for email in emails if f"@{domain}" in email.lower())
-            
+
             # Get source count
             source_count = len(domain_sources.get(domain, []))
-            
+
             # Check if from original LLM suggestions
             from_llm = domain in llm_domains
-            
+
             # Use confidence from LLM analysis
             confidence = min(1.0, domain_info.get("confidence", 0.5))
-            
+
             # Get cleaned subdomains from LLM
             sub_domains = domain_info.get("sub_mail_domains", [])
-            
+
             results.append(
                 DomainResult(
                     domain=domain,
@@ -401,10 +398,11 @@ class DomainValidator:
                 )
             )
 
-        print(f"DEBUG: Final results: {[(r.domain, r.sub_mail_domains) for r in results]}")
         return sorted(results, key=lambda x: x.confidence, reverse=True)
 
-    def _get_llm_domain_analysis(self, llm_manager: LLMManager, emails: List[str], suggested_domains: List[str]) -> List[Dict]:
+    def _get_llm_domain_analysis(
+        self, llm_manager: LLMManager, emails: List[str], suggested_domains: List[str]
+    ) -> List[Dict]:
         """Get LLM analysis of domain patterns and subdomains"""
         prompt = f"""
 Analyze these email addresses and domain suggestions to identify the main company domains and their subdomains.
@@ -447,7 +445,7 @@ Focus on finding the TOP 5 most relevant domains. Exclude generic email provider
 """
 
         response = llm_manager.query(prompt)
-        
+
         if response.success and response.data:
             # Handle both direct array and nested data structure
             domain_data = response.data
@@ -455,12 +453,13 @@ Focus on finding the TOP 5 most relevant domains. Exclude generic email provider
                 return domain_data["domains"]
             elif isinstance(domain_data, list):
                 return domain_data
-                
+
         # Fallback to basic analysis if LLM fails
-        print("DEBUG: LLM domain analysis failed, using fallback")
         return self._fallback_domain_analysis(emails, suggested_domains)
 
-    def _fallback_domain_analysis(self, emails: List[str], suggested_domains: List[str]) -> List[Dict]:
+    def _fallback_domain_analysis(
+        self, emails: List[str], suggested_domains: List[str]
+    ) -> List[Dict]:
         """Fallback domain analysis when LLM fails"""
         domain_counts = Counter()
         subdomain_map = {}
@@ -497,12 +496,14 @@ Focus on finding the TOP 5 most relevant domains. Exclude generic email provider
         for domain, email_count in domain_counts.items():
             confidence = min(1.0, 0.3 + (email_count * 0.01))
             sub_domains = list(subdomain_map.get(domain, set()))
-            
-            results.append({
-                "domain": domain,
-                "confidence": confidence,
-                "sub_mail_domains": sub_domains,
-                "reasoning": f"Fallback analysis - {email_count} emails found"
-            })
+
+            results.append(
+                {
+                    "domain": domain,
+                    "confidence": confidence,
+                    "sub_mail_domains": sub_domains,
+                    "reasoning": f"Fallback analysis - {email_count} emails found",
+                }
+            )
 
         return sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]

@@ -110,14 +110,22 @@ Focus on QUALITY over quantity. Better to return fewer, more likely emails than 
 
     try:
         data = response.data
+
         if isinstance(data, list):
             result = data
         elif isinstance(data, dict):
             # Look for email arrays in the response
             result = []
-            for key, value in data.items():
-                if isinstance(value, list) and value:
-                    result = value
+
+            # Check for 'domains' key first (common LLM response format)
+            if "domains" in data and isinstance(data["domains"], list):
+                result = data["domains"]
+            else:
+                # Fallback: look for any list value
+                for key, value in data.items():
+                    if isinstance(value, list) and value:
+                        result = value
+                        break
                     break
         else:
             result = []
@@ -135,8 +143,9 @@ def generate_fallback_emails(
     employee_name: str, domains: List[str]
 ) -> List[Dict[str, Any]]:
     """Generate fallback email patterns when LLM fails"""
+
     if not domains:
-        return []
+        domains = ["example.com"]
 
     domain = domains[0]
     name_parts = employee_name.lower().split()
@@ -154,7 +163,7 @@ def generate_fallback_emails(
         f"{first}{last[0]}@{domain}",
     ]
 
-    return [
+    result = [
         {
             "email": pattern,
             "confidence": 0.3,
@@ -165,6 +174,8 @@ def generate_fallback_emails(
         }
         for pattern in patterns
     ]
+
+    return result
 
 
 def scrape_employee_emails(
@@ -260,10 +271,8 @@ def filter_and_rank_emails(
             if not cleaned_email:
                 continue
 
-            # Check if email domain matches our target domains
+            # Extract domain from email
             email_domain = cleaned_email.split("@")[1]
-            if email_domain not in domains:
-                continue
 
             # Create EmailResult
             result = EmailResult(
